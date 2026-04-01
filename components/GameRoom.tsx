@@ -485,6 +485,3 @@ function GlobalLeaderboardInline({ style }: { style?: React.CSSProperties }) {
     </div>
   )
 }
-
-// need useState import for GlobalLeaderboardInline
-import { useState } from 'react'
