@@ -105,6 +105,9 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
     await supabase.from('rooms').update({ state: newState }).eq('code', roomCode)
     if (newState.phase === 'gameEnd') {
       for (const p of newState.players) {
+        // Skip anonymous/guest users — RLS blocks them anyway
+        const { data: { user: u } } = await supabase.auth.getUser()
+        if (p.id === userId && u?.is_anonymous) continue
         await supabase.from('scores').insert({ user_id: p.id, player_name: p.name, total_score: p.totalScore, room_code: roomCode, played_at: new Date().toISOString() })
       }
     }
