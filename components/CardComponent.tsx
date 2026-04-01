@@ -8,46 +8,54 @@ interface Props {
   disabled?: boolean
   highlight?: boolean
   faceDown?: boolean
+  dealDelay?: number
 }
 
 const sizes = {
-  sm: { w: 'w-9', h: 'h-13', rank: 'text-xs', suit: 'text-sm' },
-  md: { w: 'w-12', h: 'h-16', rank: 'text-sm', suit: 'text-base' },
-  lg: { w: 'w-14', h: 'h-20', rank: 'text-base', suit: 'text-lg' },
+  sm: { width: 36, height: 52, rankSize: 11, suitSize: 14 },
+  md: { width: 48, height: 68, rankSize: 13, suitSize: 18 },
+  lg: { width: 58, height: 82, rankSize: 15, suitSize: 22 },
 }
 
-export default function CardComponent({ card, size = 'md', onClick, disabled, highlight, faceDown }: Props) {
+export default function CardComponent({ card, size = 'md', onClick, disabled, highlight, faceDown, dealDelay = 0 }: Props) {
   const s = sizes[size]
-  const red = isRedSuit(card.suit)
+  const red = !faceDown && isRedSuit(card.suit)
 
   if (faceDown) {
     return (
-      <div className={`${s.w} ${s.h} rounded-lg bg-blue-900 border border-blue-700 flex items-center justify-center shadow-md`}
-        style={{ minWidth: size === 'lg' ? 56 : size === 'md' ? 48 : 36 }}>
-        <span className="text-blue-500 text-lg">🂠</span>
+      <div className="playing-card face-down" style={{ width: s.width, height: s.height, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+        <span style={{ fontSize: s.suitSize, opacity: 0.4, color: 'var(--gold)' }}>✦</span>
       </div>
     )
   }
 
+  const canClick = !!onClick && !disabled
+  const cls = `playing-card${highlight && onClick ? ' playable' : ''}${disabled ? ' dimmed' : ''} card-deal-anim`
+
   return (
     <button
       onClick={onClick}
-      disabled={!onClick || disabled}
-      className={`
-        ${s.w} rounded-lg bg-card border shadow-md flex flex-col items-start justify-between p-1
-        transition-all duration-150 select-none
-        ${highlight && onClick ? 'border-gold hover:scale-110 hover:-translate-y-2 cursor-pointer ring-1 ring-gold/50' : ''}
-        ${disabled ? 'opacity-40 cursor-not-allowed border-gray-400' : ''}
-        ${!highlight && !disabled && onClick ? 'border-gray-300 hover:scale-105 cursor-pointer' : ''}
-        ${!onClick ? 'border-gray-200 cursor-default' : ''}
-      `}
-      style={{ height: size === 'lg' ? 80 : size === 'md' ? 64 : 52, minWidth: size === 'lg' ? 56 : size === 'md' ? 48 : 36 }}
+      disabled={!canClick}
+      className={cls}
+      style={{
+        width: s.width, height: s.height,
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'flex-start', justifyContent: 'space-between',
+        padding: '5px 5px',
+        animationDelay: `${dealDelay}ms`,
+        cursor: canClick ? 'pointer' : 'default',
+        border: 'none',
+        flexShrink: 0,
+      }}
     >
-      <div className={`${s.rank} font-bold leading-none ${red ? 'text-red-600' : 'text-gray-900'}`}>
+      <div style={{ fontSize: s.rankSize, fontWeight: 700, lineHeight: 1, color: red ? '#c0392b' : '#1a1a2e', fontFamily: 'DM Sans, sans-serif' }}>
         {card.rank}
       </div>
-      <div className={`${s.suit} leading-none self-center ${red ? 'text-red-500' : 'text-gray-800'}`}>
+      <div style={{ fontSize: s.suitSize, lineHeight: 1, color: red ? '#c0392b' : '#1a1a2e', alignSelf: 'center' }}>
         {SUIT_SYMBOLS[card.suit]}
+      </div>
+      <div style={{ fontSize: s.rankSize, fontWeight: 700, lineHeight: 1, color: red ? '#c0392b' : '#1a1a2e', alignSelf: 'flex-end', transform: 'rotate(180deg)' }}>
+        {card.rank}
       </div>
     </button>
   )

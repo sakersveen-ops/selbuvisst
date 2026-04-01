@@ -4,15 +4,9 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        display: ['Georgia', 'serif'],
+        display: ['"Bebas Neue"', 'sans-serif'],
+        body: ['"DM Sans"', 'sans-serif'],
       },
-      colors: {
-        felt: '#1a472a',
-        felt2: '#15391f',
-        gold: '#c9a84c',
-        gold2: '#e8c96a',
-        card: '#f5f0e8',
-      }
     }
   },
   plugins: [],

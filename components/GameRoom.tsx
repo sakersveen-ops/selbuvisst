@@ -5,12 +5,7 @@ import { GameState, Card, initGame, dealRound, submitBids, playCard, nextRound, 
 import CardComponent from './CardComponent'
 import ScoreBoard from './ScoreBoard'
 
-interface Props {
-  roomCode: string
-  userId: string
-  userName: string
-  onLeave: () => void
-}
+interface Props { roomCode: string; userId: string; userName: string; onLeave: () => void }
 
 export default function GameRoom({ roomCode, userId, userName, onLeave }: Props) {
   const [room, setRoom] = useState<any>(null)
@@ -21,72 +16,47 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
   const [pendingBid, setPendingBid] = useState<number | null>(null)
   const [showScores, setShowScores] = useState(false)
   const supabase = createClient()
-
   const isHost = room?.host_id === userId
 
   const fetchRoom = useCallback(async () => {
     const { data } = await supabase.from('rooms').select('*').eq('code', roomCode).single()
-    if (data) {
-      setRoom(data)
-      if (data.state) setGameState(data.state)
-    }
+    if (data) { setRoom(data); if (data.state) setGameState(data.state) }
   }, [roomCode, supabase])
 
   useEffect(() => {
     fetchRoom()
-    const channel = supabase
-      .channel(`room:${roomCode}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `code=eq.${roomCode}` },
-        (payload) => {
-          setRoom(payload.new)
-          if (payload.new.state) setGameState(payload.new.state)
-        })
-      .subscribe()
+    const channel = supabase.channel(`room:${roomCode}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `code=eq.${roomCode}` }, (payload) => {
+        setRoom(payload.new); if (payload.new.state) setGameState(payload.new.state)
+      }).subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [roomCode, fetchRoom, supabase])
 
   async function updateState(newState: GameState) {
     setGameState(newState)
     await supabase.from('rooms').update({ state: newState }).eq('code', roomCode)
-    // Save scores to leaderboard if game ends
     if (newState.phase === 'gameEnd') {
       for (const p of newState.players) {
-        await supabase.from('scores').insert({
-          user_id: p.id,
-          player_name: p.name,
-          total_score: p.totalScore,
-          room_code: roomCode,
-          played_at: new Date().toISOString(),
-        })
+        await supabase.from('scores').insert({ user_id: p.id, player_name: p.name, total_score: p.totalScore, room_code: roomCode, played_at: new Date().toISOString() })
       }
     }
   }
 
   function startGame() {
     if (!room) return
-    const state = dealRound(initGame(room.players))
-    updateState(state)
+    updateState(dealRound(initGame(room.players)))
   }
 
-  function submitMyBid() {
+  async function submitMyBid() {
     if (pendingBid === null || !gameState) return
     const newAllBids = { ...allBidsIn, [userId]: pendingBid }
-    setAllBidsIn(newAllBids)
-    setMyBid(pendingBid)
-
+    setAllBidsIn(newAllBids); setMyBid(pendingBid)
     if (Object.keys(newAllBids).length === gameState.players.length) {
       const newState = submitBids(gameState, newAllBids)
       setBidsRevealed(true)
-      setTimeout(() => {
-        updateState(newState)
-        setBidsRevealed(false)
-        setAllBidsIn({})
-        setMyBid(null)
-        setPendingBid(null)
-      }, 2500)
+      setTimeout(() => { updateState(newState); setBidsRevealed(false); setAllBidsIn({}); setMyBid(null); setPendingBid(null) }, 2800)
     } else {
-      // Store bid in room's bid_staging
-      supabase.from('rooms').update({ bid_staging: newAllBids }).eq('code', roomCode)
+      await supabase.from('rooms').update({ bid_staging: newAllBids }).eq('code', roomCode)
     }
   }
 
@@ -97,171 +67,179 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
     if (Object.keys(staging).length === gameState.players.length && !bidsRevealed) {
       const newState = submitBids(gameState, staging)
       setBidsRevealed(true)
-      setTimeout(() => {
-        updateState(newState)
-        setBidsRevealed(false)
-        setAllBidsIn({})
-        setMyBid(null)
-        setPendingBid(null)
-        supabase.from('rooms').update({ bid_staging: {} }).eq('code', roomCode)
-      }, 2500)
+      setTimeout(() => { updateState(newState); setBidsRevealed(false); setAllBidsIn({}); setMyBid(null); setPendingBid(null); supabase.from('rooms').update({ bid_staging: {} }).eq('code', roomCode) }, 2800)
     }
   }, [room?.bid_staging])
 
   function handlePlayCard(card: Card) {
     if (!gameState) return
-    const myPlayer = gameState.players.find(p => p.id === userId)
-    if (!myPlayer) return
     const currentPlayer = gameState.players[gameState.currentPlayerIndex]
     if (currentPlayer.id !== userId) return
-    const newState = playCard(gameState, userId, card)
-    updateState(newState)
+    updateState(playCard(gameState, userId, card))
   }
 
   function handleNextRound() {
     if (!gameState) return
-    const ns = nextRound(gameState)
-    updateState(ns)
-    setShowScores(false)
+    updateState(nextRound(gameState)); setShowScores(false)
   }
 
-  if (!room) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gold text-xl">Laster rom...</div>
-      </div>
-    )
-  }
+  if (!room) return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <div className="orb orb-1" />
+      <div className="font-display text-gold" style={{fontSize:32,position:'relative',zIndex:1}}>Laster rom...</div>
+    </div>
+  )
 
   const myPlayer = gameState?.players.find(p => p.id === userId)
   const currentPlayer = gameState ? gameState.players[gameState.currentPlayerIndex] : null
   const isMyTurn = currentPlayer?.id === userId
   const trumpSuit = gameState?.trump?.suit
 
-  // Lobby (no game started)
-  if (!gameState) {
-    return (
-      <div className="min-h-screen p-4">
-        <div className="max-w-md mx-auto">
-          <button onClick={onLeave} className="text-gold/70 hover:text-gold mb-4">← Lobby</button>
-          <div className="bg-felt2 border border-gold/30 rounded-2xl p-6">
-            <div className="text-center mb-6">
-              <p className="text-green-400 text-sm">Romkode</p>
-              <p className="text-4xl font-mono font-bold text-gold tracking-widest">{roomCode}</p>
-              <p className="text-green-500 text-xs mt-1">Del denne koden med venner</p>
-            </div>
-            <h3 className="text-gold text-sm font-semibold mb-3">Spillere ({room.players?.length}/5)</h3>
-            <ul className="space-y-2 mb-6">
-              {room.players?.map((p: any) => (
-                <li key={p.id} className="flex items-center gap-2 bg-felt rounded-lg px-3 py-2">
-                  <span className="text-gold">♠</span>
-                  <span className="text-card text-sm">{p.name}</span>
-                  {p.id === room.host_id && <span className="text-xs text-gold/60 ml-auto">vertskap</span>}
-                </li>
-              ))}
-            </ul>
-            {isHost ? (
-              <button
-                onClick={startGame}
-                disabled={!room.players || room.players.length < 2}
-                className="w-full bg-gold hover:bg-gold2 disabled:opacity-40 text-felt font-bold py-3 rounded-xl transition-all">
-                Start spill ({room.players?.length} spillere)
-              </button>
-            ) : (
-              <p className="text-center text-green-500 text-sm">Venter på at verten starter spillet...</p>
-            )}
+  // ── LOBBY ──
+  if (!gameState) return (
+    <div style={{minHeight:'100vh',padding:16,position:'relative'}}>
+      <div className="orb orb-1" /><div className="orb orb-2" />
+      <div style={{maxWidth:420,margin:'0 auto',position:'relative',zIndex:1}}>
+        <button onClick={onLeave} className="btn-glass" style={{padding:'8px 18px',fontSize:13,marginBottom:20}}>← Tilbake</button>
+        <div className="glass float-in" style={{padding:28}}>
+          <div style={{textAlign:'center',marginBottom:24}}>
+            <p className="text-muted" style={{fontSize:11,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:6}}>Romkode</p>
+            <div className="font-display text-gold" style={{fontSize:64,letterSpacing:'0.15em',lineHeight:1,textShadow:'0 4px 24px rgba(245,200,66,0.5)'}}>{roomCode}</div>
+            <p className="text-muted" style={{fontSize:12,marginTop:6}}>Del denne koden med venner</p>
           </div>
-        </div>
-      </div>
-    )
-  }
 
-  if (gameState.phase === 'gameEnd') {
-    const sorted = [...gameState.players].sort((a, b) => b.totalScore - a.totalScore)
-    return (
-      <div className="min-h-screen p-4">
-        <div className="max-w-md mx-auto">
-          <div className="text-center py-8">
-            <div className="text-5xl mb-2">🏆</div>
-            <h2 className="text-3xl font-display text-gold">Spillet er over!</h2>
-            <p className="text-gold/70 text-lg mt-1">Vinner: {sorted[0].name}</p>
-          </div>
-          <div className="bg-felt2 border border-gold/30 rounded-2xl p-4 mb-4">
-            {sorted.map((p, i) => (
-              <div key={p.id} className="flex items-center py-2 border-b border-green-900 last:border-0">
-                <span className="text-gold font-bold w-8">{i + 1}.</span>
-                <span className="flex-1 text-card">{p.name}</span>
-                <span className="text-gold font-mono font-bold">{p.totalScore} p</span>
+          <p className="text-gold" style={{fontSize:11,fontWeight:600,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:12}}>
+            Spillere ({room.players?.length}/5)
+          </p>
+          <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:20}}>
+            {room.players?.map((p: any, i: number) => (
+              <div key={p.id} className="player-chip" style={{padding:'10px 14px',display:'flex',alignItems:'center',gap:10,animationDelay:`${i*80}ms`}} >
+                <div style={{width:32,height:32,borderRadius:'50%',background:'linear-gradient(135deg,var(--purple-bright),var(--purple-mid))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,flexShrink:0}}>
+                  {p.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-cream" style={{fontSize:14}}>{p.name}</span>
+                {p.id === room.host_id && <span className="text-gold" style={{fontSize:11,marginLeft:'auto',opacity:0.7}}>vertskap</span>}
               </div>
             ))}
           </div>
-          <button onClick={onLeave} className="w-full border border-gold/40 hover:border-gold text-gold py-3 rounded-xl">
-            Tilbake til lobby
-          </button>
-        </div>
-      </div>
-    )
-  }
 
-  if (gameState.phase === 'roundEnd' || showScores) {
-    return (
-      <div className="min-h-screen p-4">
-        <div className="max-w-md mx-auto">
-          <ScoreBoard gameState={gameState} />
-          {isHost && (
-            <button onClick={handleNextRound}
-              className="w-full bg-gold hover:bg-gold2 text-felt font-bold py-3 rounded-xl mt-4 transition-all">
-              Neste runde ({gameState.round - 1} kort) →
+          {isHost ? (
+            <button onClick={startGame} disabled={!room.players || room.players.length < 2} className="btn-gold" style={{width:'100%',padding:16,fontSize:16}}>
+              Start spill →
             </button>
+          ) : (
+            <p className="text-muted" style={{textAlign:'center',fontSize:13}}>Venter på at verten starter...</p>
           )}
-          {!isHost && <p className="text-center text-green-500 text-sm mt-4">Venter på at verten starter neste runde...</p>}
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── GAME END ──
+  if (gameState.phase === 'gameEnd') {
+    const sorted = [...gameState.players].sort((a, b) => b.totalScore - a.totalScore)
+    return (
+      <div style={{minHeight:'100vh',padding:16,position:'relative'}}>
+        <div className="orb orb-1" /><div className="orb orb-2" />
+        <div style={{maxWidth:420,margin:'0 auto',position:'relative',zIndex:1,paddingTop:40}}>
+          <div style={{textAlign:'center',marginBottom:28}}>
+            <div style={{fontSize:64,marginBottom:8}}>🏆</div>
+            <div className="font-display text-gold" style={{fontSize:44}}>SPILLET ER OVER</div>
+            <p className="text-gold-light" style={{fontSize:18,marginTop:4}}>Vinner: {sorted[0].name}</p>
+          </div>
+          <div className="glass float-in" style={{padding:20,marginBottom:12}}>
+            {sorted.map((p, i) => (
+              <div key={p.id} style={{display:'flex',alignItems:'center',padding:'12px 0',borderBottom: i<sorted.length-1 ? '1px solid rgba(255,255,255,0.08)' : 'none'}}>
+                <span className="font-display text-gold" style={{fontSize:28,width:36}}>{i+1}</span>
+                <div style={{width:36,height:36,borderRadius:'50%',background:'linear-gradient(135deg,var(--purple-bright),var(--purple-mid))',display:'flex',alignItems:'center',justifyContent:'center',marginRight:12,flexShrink:0}}>
+                  {p.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="text-cream" style={{flex:1,fontSize:15}}>{p.name}</span>
+                <span className="font-display text-gold" style={{fontSize:28}}>{p.totalScore}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={onLeave} className="btn-glass" style={{width:'100%',padding:14}}>Tilbake til lobby</button>
         </div>
       </div>
     )
   }
 
+  // ── ROUND END / SCORES ──
+  if (gameState.phase === 'roundEnd' || showScores) return (
+    <div style={{minHeight:'100vh',padding:16,position:'relative'}}>
+      <div className="orb orb-1" /><div className="orb orb-2" />
+      <div style={{maxWidth:480,margin:'0 auto',position:'relative',zIndex:1,paddingTop:20}}>
+        <ScoreBoard gameState={gameState} />
+        <div style={{marginTop:12}}>
+          {isHost ? (
+            <button onClick={handleNextRound} className="btn-gold" style={{width:'100%',padding:16,fontSize:16}}>
+              Neste runde — {gameState.round - 1} kort →
+            </button>
+          ) : (
+            <p className="text-muted" style={{textAlign:'center',fontSize:13}}>Venter på at verten starter neste runde...</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+
+  // ── MAIN GAME ──
   return (
-    <div className="min-h-screen flex flex-col">
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',position:'relative'}}>
+      <div className="orb orb-2" style={{opacity:0.3}} />
+
       {/* Header */}
-      <div className="bg-felt2 border-b border-gold/20 px-4 py-3 flex items-center justify-between">
-        <div>
-          <span className="text-gold font-mono font-bold">{roomCode}</span>
-          <span className="text-green-500 text-sm ml-2">· Runde {gameState.round} kort</span>
+      <div style={{background:'rgba(0,0,0,0.3)',backdropFilter:'blur(20px)',borderBottom:'1px solid rgba(255,255,255,0.08)',padding:'12px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',position:'relative',zIndex:2}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <button onClick={onLeave} style={{background:'none',border:'none',color:'rgba(255,248,231,0.4)',cursor:'pointer',fontSize:16,padding:0}}>←</button>
+          <div>
+            <span className="font-display text-gold" style={{fontSize:22,letterSpacing:'0.1em'}}>{roomCode}</span>
+            <span className="text-muted" style={{fontSize:12,marginLeft:8}}>Runde {gameState.round} kort</span>
+          </div>
         </div>
         {trumpSuit && (
-          <div className="flex items-center gap-1">
-            <span className="text-green-400 text-xs">Trumf:</span>
-            <span className={`text-xl ${isRedSuit(trumpSuit) ? 'text-red-400' : 'text-card'}`}>
-              {SUIT_SYMBOLS[trumpSuit]}
-            </span>
+          <div className="trump-badge" style={{display:'flex',alignItems:'center',gap:6}}>
+            <span className="text-muted" style={{fontSize:11}}>TRUMF</span>
+            <span style={{fontSize:22, color: isRedSuit(trumpSuit) ? '#e05252' : 'var(--cream)'}}>{SUIT_SYMBOLS[trumpSuit]}</span>
           </div>
         )}
-        <button onClick={() => setShowScores(true)} className="text-gold/60 hover:text-gold text-xs">Poeng</button>
+        <button onClick={() => setShowScores(true)} className="btn-glass" style={{padding:'6px 14px',fontSize:12}}>Poeng</button>
       </div>
 
-      {/* Other players */}
-      <div className="px-4 py-3 flex gap-2 overflow-x-auto border-b border-green-900">
+      {/* Opponents */}
+      <div style={{padding:'12px 12px 0',display:'flex',gap:8,overflowX:'auto',position:'relative',zIndex:1}}>
         {gameState.players.filter(p => p.id !== userId).map(p => (
-          <div key={p.id} className={`flex-shrink-0 bg-felt2 rounded-xl px-3 py-2 border ${currentPlayer?.id === p.id ? 'border-gold pulse-gold' : 'border-green-900'}`}>
-            <p className="text-card text-xs font-semibold">{p.name}</p>
-            <p className="text-green-400 text-xs">{p.hand.length} kort · {p.bid !== null ? `meldt ${p.bid}` : '...'} · {p.tricks} stikk</p>
-            <p className="text-gold text-xs font-mono">{p.totalScore} p</p>
+          <div key={p.id} className={`player-chip ${currentPlayer?.id === p.id ? 'active' : ''}`} style={{padding:'10px 14px',flexShrink:0,minWidth:140}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+              <div style={{width:28,height:28,borderRadius:'50%',background:'linear-gradient(135deg,var(--purple-bright),var(--purple-mid))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,flexShrink:0}}>
+                {p.name.charAt(0).toUpperCase()}
+              </div>
+              <span className="text-cream" style={{fontSize:13,fontWeight:500}}>{p.name.split(' ')[0]}</span>
+              {currentPlayer?.id === p.id && <span style={{fontSize:10,color:'var(--gold)',marginLeft:'auto'}}>↻</span>}
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
+              <span className="text-muted">{p.hand.length}🃏 · {p.bid !== null ? `meldt ${p.bid}` : '...'} · ${p.tricks} stikk</span>
+              <span className="font-display text-gold" style={{fontSize:16}}>{p.totalScore}</span>
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Current trick */}
-      <div className="flex-1 flex flex-col items-center justify-center py-4 px-4">
+      {/* Table / center */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:'16px',position:'relative',zIndex:1}}>
+
+        {/* Current trick */}
         {gameState.currentTrick.length > 0 && (
-          <div className="mb-4">
-            <p className="text-green-500 text-xs text-center mb-2">Stikk pågår</p>
-            <div className="flex gap-2 justify-center">
+          <div style={{marginBottom:16,textAlign:'center'}}>
+            <p className="text-muted" style={{fontSize:11,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:10}}>Stikk pågår</p>
+            <div style={{display:'flex',gap:10,justifyContent:'center'}}>
               {gameState.currentTrick.map(({ playerId, card }) => {
                 const player = gameState.players.find(p => p.id === playerId)
                 return (
-                  <div key={playerId} className="text-center">
+                  <div key={playerId} style={{textAlign:'center'}}>
                     <CardComponent card={card} size="md" />
-                    <p className="text-green-400 text-xs mt-1">{player?.name?.split(' ')[0]}</p>
+                    <p className="text-muted" style={{fontSize:11,marginTop:4}}>{player?.name?.split(' ')[0]}</p>
                   </div>
                 )
               })}
@@ -271,37 +249,43 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
 
         {/* Bidding phase */}
         {gameState.phase === 'bidding' && (
-          <div className="w-full max-w-sm bg-felt2 border border-gold/30 rounded-2xl p-4">
+          <div className="glass float-in" style={{padding:24,width:'100%',maxWidth:380}}>
             {gameState.unseenBid && (
-              <div className="bg-amber-900/30 border border-amber-700/50 rounded-lg px-3 py-2 mb-3">
-                <p className="text-amber-400 text-sm text-center font-semibold">🙈 By uten å se kortene!</p>
+              <div style={{background:'rgba(245,200,66,0.1)',border:'1px solid rgba(245,200,66,0.3)',borderRadius:12,padding:'10px 16px',marginBottom:16,textAlign:'center'}}>
+                <span style={{fontSize:16}}>🙈</span>
+                <span className="text-gold" style={{fontSize:13,fontWeight:600,marginLeft:8}}>By uten å se kortene!</span>
               </div>
             )}
-            <p className="text-gold text-sm font-semibold text-center mb-3">Meld stikk</p>
-            <div className="flex flex-wrap gap-2 justify-center mb-4">
-              {Array.from({ length: gameState.round + 1 }, (_, i) => i).map(n => (
+            <p className="text-gold" style={{textAlign:'center',fontSize:13,fontWeight:600,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:16}}>Meld antall stikk</p>
+            <div style={{display:'flex',flexWrap:'wrap',gap:8,justifyContent:'center',marginBottom:16}}>
+              {Array.from({length: gameState.round + 1}, (_, i) => i).map(n => (
                 <button key={n} onClick={() => setPendingBid(n)}
-                  className={`w-12 h-12 rounded-xl font-bold text-lg transition-all ${pendingBid === n ? 'bg-gold text-felt scale-110' : 'bg-felt border border-gold/30 text-gold hover:border-gold'}`}>
+                  className={`bid-btn${pendingBid === n ? ' selected' : ''}`}>
                   {n}
                 </button>
               ))}
             </div>
             {myBid !== null ? (
-              <p className="text-center text-green-400 text-sm">
-                Du meldte {myBid} · Venter på andre ({Object.keys(allBidsIn).length}/{gameState.players.length})
-              </p>
+              <div style={{textAlign:'center'}}>
+                <p className="text-gold" style={{fontSize:14,marginBottom:6}}>Du meldte <strong>{myBid}</strong></p>
+                <p className="text-muted" style={{fontSize:12}}>Venter... ({Object.keys(allBidsIn).length}/{gameState.players.length})</p>
+                <div style={{display:'flex',justifyContent:'center',gap:6,marginTop:8}}>
+                  {gameState.players.map(p => (
+                    <div key={p.id} style={{width:8,height:8,borderRadius:'50%',background: allBidsIn[p.id] !== undefined ? 'var(--gold)' : 'rgba(255,255,255,0.2)',transition:'background 0.3s'}} />
+                  ))}
+                </div>
+              </div>
             ) : (
-              <button onClick={submitMyBid} disabled={pendingBid === null}
-                className="w-full bg-gold hover:bg-gold2 disabled:opacity-40 text-felt font-bold py-3 rounded-xl transition-all">
+              <button onClick={submitMyBid} disabled={pendingBid === null} className="btn-gold" style={{width:'100%',padding:14}}>
                 Meld {pendingBid !== null ? pendingBid : '?'} stikk
               </button>
             )}
             {bidsRevealed && (
-              <div className="mt-3 text-center">
-                <p className="text-gold font-semibold">🎴 Alle har meldt!</p>
+              <div style={{marginTop:16,padding:16,background:'rgba(245,200,66,0.08)',borderRadius:12,border:'1px solid rgba(245,200,66,0.2)'}}>
+                <p className="text-gold" style={{textAlign:'center',fontWeight:600,marginBottom:8}}>🎴 Alle har meldt!</p>
                 {Object.entries(allBidsIn).map(([pid, bid]) => {
                   const p = gameState.players.find(pl => pl.id === pid)
-                  return <p key={pid} className="text-green-300 text-sm">{p?.name}: {bid} stikk</p>
+                  return <p key={pid} className="text-muted" style={{fontSize:13,textAlign:'center'}}>{p?.name}: <strong className="text-gold">{bid}</strong></p>
                 })}
               </div>
             )}
@@ -309,49 +293,47 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
         )}
 
         {gameState.phase === 'playing' && !isMyTurn && (
-          <div className="text-center">
-            <p className="text-green-400 text-sm">
-              {currentPlayer?.name} spiller...
-            </p>
-            <div className="mt-2 text-xs text-green-600">
-              {myPlayer?.bid !== null && `Du meldte ${myPlayer?.bid} · Tatt ${myPlayer?.tricks} stikk`}
+          <div style={{textAlign:'center'}}>
+            <div className="glass-sm" style={{display:'inline-block',padding:'12px 24px',background:'rgba(0,0,0,0.2)'}}>
+              <p className="text-muted" style={{fontSize:13}}>{currentPlayer?.name} spiller...</p>
             </div>
+            {myPlayer?.bid !== null && (
+              <p className="text-muted" style={{fontSize:12,marginTop:8}}>Du meldte {myPlayer?.bid} · Tatt {myPlayer?.tricks} stikk</p>
+            )}
           </div>
         )}
 
-        {gameState.phase === 'playing' && isMyTurn && gameState.currentTrick.length === 0 && (
-          <p className="text-gold text-sm animate-pulse mb-2">Din tur – velg et kort å lede med</p>
-        )}
-        {gameState.phase === 'playing' && isMyTurn && gameState.currentTrick.length > 0 && (
-          <p className="text-gold text-sm animate-pulse mb-2">Din tur</p>
+        {gameState.phase === 'playing' && isMyTurn && (
+          <div className="glass-sm" style={{padding:'10px 20px',background:'rgba(245,200,66,0.08)',border:'1px solid rgba(245,200,66,0.25)',marginBottom:8}}>
+            <p className="text-gold" style={{fontSize:13,fontWeight:600,textAlign:'center'}}>
+              {gameState.currentTrick.length === 0 ? '⭐ Din tur — velg kort å lede med' : '⭐ Din tur'}
+            </p>
+          </div>
         )}
       </div>
 
       {/* My hand */}
-      <div className="bg-felt2 border-t border-green-900 px-4 py-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-green-500 text-xs">
-            {myPlayer?.bid !== null
-              ? `Meldt: ${myPlayer.bid} · Tatt: ${myPlayer?.tricks}`
-              : 'Din hånd'}
+      <div style={{background:'rgba(0,0,0,0.35)',backdropFilter:'blur(20px)',borderTop:'1px solid rgba(255,255,255,0.08)',padding:'14px 12px 20px',position:'relative',zIndex:2}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10,padding:'0 4px'}}>
+          <p className="text-muted" style={{fontSize:12}}>
+            {myPlayer?.bid !== null ? `Meldt: ${myPlayer?.bid} · Tatt: ${myPlayer?.tricks}` : 'Din hånd'}
           </p>
-          <p className="text-gold text-xs font-mono">{myPlayer?.totalScore} p</p>
+          <span className="font-display text-gold" style={{fontSize:22}}>{myPlayer?.totalScore}</span>
         </div>
-        <div className="flex gap-1 flex-wrap justify-center">
+        <div style={{display:'flex',gap:4,flexWrap:'wrap',justifyContent:'center'}}>
           {myPlayer?.hand.map((card, i) => {
             const canPlay = gameState.phase === 'playing' && isMyTurn
-            const mustFollowSuit = gameState.leadSuit && myPlayer.hand.some(c => c.suit === gameState.leadSuit)
-            const isPlayable = canPlay && (!mustFollowSuit || card.suit === gameState.leadSuit)
+            const mustFollow = gameState.leadSuit && myPlayer.hand.some(c => c.suit === gameState.leadSuit)
+            const isPlayable = canPlay && (!mustFollow || card.suit === gameState.leadSuit)
             return (
-              <div key={`${card.suit}${card.rank}`} style={{ animationDelay: `${i * 30}ms` }} className="card-deal">
-                <CardComponent
-                  card={card}
-                  size="lg"
-                  onClick={isPlayable ? () => handlePlayCard(card) : undefined}
-                  disabled={canPlay && !isPlayable}
-                  highlight={isPlayable}
-                />
-              </div>
+              <CardComponent
+                key={`${card.suit}${card.rank}${i}`}
+                card={card} size="lg"
+                onClick={isPlayable ? () => handlePlayCard(card) : undefined}
+                disabled={canPlay && !isPlayable}
+                highlight={isPlayable}
+                dealDelay={i * 40}
+              />
             )
           })}
         </div>
