@@ -1,14 +1,45 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+
+// ── QR code rendered via QRious CDN lib ──────────────────────────────────────
+function QRCodeDisplay({ url }: { url: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!ref.current) return
+    ref.current.innerHTML = ''
+    const render = () => {
+      const canvas = document.createElement('canvas')
+      ref.current!.appendChild(canvas)
+      // @ts-ignore
+      new window.QRious({ element: canvas, value: url, size: 140, backgroundAlpha: 0, foreground: '#16165a', level: 'M' })
+    }
+    if ((window as any).QRious) {
+      render()
+    } else {
+      const s = document.createElement('script')
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js'
+      s.onload = render
+      document.head.appendChild(s)
+    }
+    return () => { if (ref.current) ref.current.innerHTML = '' }
+  }, [url])
+  return (
+    <div ref={ref} style={{
+      background:'#fffef5', borderRadius:12, padding:10, display:'inline-flex',
+      alignItems:'center', justifyContent:'center',
+      boxShadow:'0 4px 20px rgba(0,0,0,0.3)'
+    }} />
+  )
+}
 import { createClient } from '@/lib/supabase'
 import { GameState, Card, initGame, dealRound, submitBids, playCard, nextRound, SUIT_SYMBOLS, isRedSuit, totalRounds, roundsPlayed, rankValue } from '@/lib/game'
 import CardComponent from './CardComponent'
 import ScoreBoard from './ScoreBoard'
 import RoomLeaderboard from './RoomLeaderboard'
 
-interface Props { roomCode: string; userId: string; userName: string; onLeave: () => void }
+interface Props { roomCode: string; userId: string; userName: string; onLeave: () => void; isGuest?: boolean; qrUrl?: string }
 
-export default function GameRoom({ roomCode, userId, userName, onLeave }: Props) {
+export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest, qrUrl }: Props) {
   const [room, setRoom] = useState<any>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
   const [myBid, setMyBid] = useState<number | null>(null)
@@ -142,7 +173,13 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
             <div style={{textAlign:'center',marginBottom:24}}>
               <p className="text-muted" style={{fontSize:11,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:6}}>Romkode</p>
               <div className="font-display text-gold" style={{fontSize:64,letterSpacing:'0.15em',lineHeight:1,textShadow:'0 4px 24px rgba(245,200,66,0.5)'}}>{roomCode}</div>
-              <p className="text-muted" style={{fontSize:12,marginTop:6}}>Del denne koden med venner</p>
+              <p className="text-muted" style={{fontSize:12,marginTop:6}}>Del koden eller QR-koden</p>
+              {qrUrl && (
+                <div style={{marginTop:16,display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
+                  <QRCodeDisplay url={qrUrl} />
+                  <p className="text-muted" style={{fontSize:10}}>Skann for å bli med</p>
+                </div>
+              )}
             </div>
 
             {/* Host settings */}

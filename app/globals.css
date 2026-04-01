@@ -145,27 +145,40 @@ body {
 /* ── Cards ── */
 .playing-card {
   background: linear-gradient(160deg, #fffef5 0%, #f5f0e0 100%);
-  border: 1px solid rgba(255,255,255,0.9);
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 1px 0 rgba(255,255,255,0.8) inset;
+  border: 1px solid rgba(200,190,160,0.8);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.8) inset;
   color: #1a1a2e;
-  transition: all 0.18s cubic-bezier(0.34,1.56,0.64,1);
+  transition: transform 0.15s cubic-bezier(0.34,1.4,0.64,1), box-shadow 0.15s ease;
   cursor: default;
   position: relative;
   flex-shrink: 0;
+  overflow: hidden;  /* clip SVG to card shape */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.playing-card svg {
+  display: block;
+  border-radius: 7px;
+  overflow: hidden;
 }
 .playing-card.playable {
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 2px var(--gold), 0 0 16px rgba(245,200,66,0.4);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.35), 0 0 0 2px var(--gold), 0 0 12px rgba(245,200,66,0.35);
 }
-.playing-card.playable:hover {
-  transform: translateY(-10px) scale(1.08);
-  box-shadow: 0 16px 32px rgba(0,0,0,0.5), 0 0 0 2px var(--gold), 0 0 24px rgba(245,200,66,0.6);
+@media (hover: hover) {
+  .playing-card.playable:hover {
+    transform: translateY(-8px) scale(1.06);
+    box-shadow: 0 12px 28px rgba(0,0,0,0.5), 0 0 0 2px var(--gold), 0 0 20px rgba(245,200,66,0.55);
+  }
+}
+.playing-card.playable:active {
+  transform: translateY(-4px) scale(1.03);
 }
 .playing-card.dimmed { opacity: 0.35; filter: grayscale(0.5); }
 .playing-card.face-down {
-  background: linear-gradient(135deg, var(--purple-mid) 0%, var(--purple-deep) 100%);
-  border-color: rgba(245,200,66,0.3);
+  background: #3730a3;
+  border-color: rgba(245,200,66,0.25);
 }
 .card-red { color: #c0392b; }
 .card-black { color: #1a1a2e; }
