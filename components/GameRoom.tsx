@@ -446,9 +446,17 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
           <span className="font-display text-gold" style={{fontSize:22}}>{myPlayer?.totalScore}</span>
         </div>
         <div style={{display:'flex',gap:3,flexWrap:'wrap',justifyContent:'center'}}>
-          {myPlayer?.hand.map((card, i) => {
+          {[...(myPlayer?.hand ?? [])].sort((a, b) => {
+            const SUIT_ORDER: Record<string, number> = { S: 0, H: 1, D: 2, C: 3 }
+            const trump = gameState.trump?.suit
+            const aTrump = a.suit === trump ? 1 : 0
+            const bTrump = b.suit === trump ? 1 : 0
+            if (aTrump !== bTrump) return aTrump - bTrump
+            if (a.suit !== b.suit) return SUIT_ORDER[a.suit] - SUIT_ORDER[b.suit]
+            return rankValue(a.rank) - rankValue(b.rank)
+          }).map((card, i) => {
             const canPlay = gameState.phase === 'playing' && isMyTurn
-            const mustFollow = gameState.leadSuit && myPlayer.hand.some(c => c.suit === gameState.leadSuit)
+            const mustFollow = gameState.leadSuit && myPlayer!.hand.some(c => c.suit === gameState.leadSuit)
             const isPlayable = canPlay && (!mustFollow || card.suit === gameState.leadSuit)
             return (
               <CardComponent key={`${card.suit}${card.rank}${i}`} card={card} size="lg"
