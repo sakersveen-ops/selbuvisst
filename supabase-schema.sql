@@ -47,3 +47,14 @@ create policy "scores_insert" on scores for insert to authenticated with check (
 
 -- Realtime
 alter publication supabase_realtime add table rooms;
+
+-- ── ANONYMOUS AUTH ──────────────────────────────────────────────────────────
+-- Enable in: Supabase Dashboard → Authentication → Providers → Anonymous Sign-ins → Enable
+-- No SQL needed, but scores policy should exclude anonymous users from global board:
+
+-- Optional: view that only shows non-anonymous scores on global leaderboard
+create or replace view public_scores as
+  select s.*, u.is_anonymous
+  from scores s
+  left join auth.users u on u.id = s.user_id
+  where u.is_anonymous is not true or u.is_anonymous is null;
