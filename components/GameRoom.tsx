@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase'
-import { GameState, Card, initGame, dealRound, submitBids, playCard, nextRound, SUIT_SYMBOLS, isRedSuit, totalRounds, roundsPlayed } from '@/lib/game'
+import { GameState, Card, initGame, dealRound, submitBids, playCard, nextRound, SUIT_SYMBOLS, isRedSuit, totalRounds, roundsPlayed, rankValue } from '@/lib/game'
 import CardComponent from './CardComponent'
 import ScoreBoard from './ScoreBoard'
 import RoomLeaderboard from './RoomLeaderboard'
