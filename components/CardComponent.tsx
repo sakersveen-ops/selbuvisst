@@ -19,7 +19,7 @@ const sizes = {
 }
 
 // Crisp, correct suit symbols as unicode — simple and readable
-const SUIT_CHAR: Record<string, string> = { S: '♠', H: '♥', D: '♦', C: '♣' }
+const SUIT_CHAR: Record<string, string> = { S: '\u2660\uFE0E', H: '\u2665\uFE0E', D: '\u2666\uFE0E', C: '\u2663\uFE0E' }
 
 // Pip grid: [col, row] where col 0=left,1=center,2=right  row 0..4 top→bottom
 // flipped=true means rotate 180 (for bottom half pips)
