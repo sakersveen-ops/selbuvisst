@@ -49,6 +49,9 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
   const [sidePanel, setSidePanel] = useState<'none' | 'roundScores' | 'roomBoard' | 'globalBoard'>('none')
   const [showLastTrick, setShowLastTrick] = useState(false)
   const [trickJustResolved, setTrickJustResolved] = useState(false)
+  const [trickWinToast, setTrickWinToast] = useState<{name:string; isMe:boolean; key:number} | null>(null)
+  const [trumpAnimating, setTrumpAnimating] = useState(false)
+  const [trumpCardShown, setTrumpCardShown] = useState<{suit:string;rank:string}|null>(null)
   // Lobby settings (host only)
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [maxRounds, setMaxRounds] = useState(10)
@@ -72,7 +75,23 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
     const ch = supabase.channel(`room:${roomCode}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `code=eq.${roomCode}` }, payload => {
         setRoom(payload.new)
-        if (payload.new.state) setGameState(payload.new.state)
+        if (payload.new.state) {
+          const incoming: GameState = payload.new.state
+          setGameState(prev => {
+            // Fire toast if a new trick winner appeared (remote player finished the trick)
+            if (incoming.lastTrickWinnerId &&
+                incoming.lastTrick?.length === incoming.players.length &&
+                incoming.currentTrick.length === 0 &&
+                prev?.lastTrickWinnerId !== incoming.lastTrickWinnerId) {
+              const winner = incoming.players.find(p => p.id === incoming.lastTrickWinnerId)
+              if (winner) {
+                setTrickWinToast({ name: winner.name.split(' ')[0], isMe: winner.id === userId, key: Date.now() })
+                setTimeout(() => setTrickWinToast(null), 2200)
+              }
+            }
+            return incoming
+          })
+        }
       })
       .subscribe()
     return () => { supabase.removeChannel(ch) }
@@ -136,6 +155,14 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
     const trickCompleted = newState.currentTrick.length === 0 && gameState.currentTrick.length === gameState.players.length - 1
     if (trickCompleted && newState.phase === 'playing') {
       setTrickJustResolved(true)
+      // Fire win toast
+      if (newState.lastTrickWinnerId) {
+        const winner = newState.players.find(p => p.id === newState.lastTrickWinnerId)
+        if (winner) {
+          setTrickWinToast({ name: winner.name.split(' ')[0], isMe: winner.id === userId, key: Date.now() })
+          setTimeout(() => setTrickWinToast(null), 2200)
+        }
+      }
       setGameState(newState)
       setTimeout(async () => {
         setTrickJustResolved(false)
@@ -153,8 +180,29 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
 
   function handleDrawTrump() {
     if (!gameState || !isHost) return
-    updateState(drawTrump(gameState))
+    const newState = drawTrump(gameState)
+    if (newState.trump) {
+      setTrumpCardShown(newState.trump)
+      setTrumpAnimating(true)
+      // Update state immediately so others see it, animation plays locally
+      updateState(newState)
+      setTimeout(() => setTrumpAnimating(false), 3200)
+    } else {
+      updateState(newState)
+    }
   }
+
+  // When remote update brings a revealed trump (other players), show animation too
+  const prevTrumpRevealed = useRef(false)
+  useEffect(() => {
+    if (!gameState) return
+    if (gameState.trumpRevealed && !prevTrumpRevealed.current && gameState.trump) {
+      setTrumpCardShown(gameState.trump)
+      setTrumpAnimating(true)
+      setTimeout(() => setTrumpAnimating(false), 3200)
+    }
+    prevTrumpRevealed.current = gameState.trumpRevealed
+  }, [gameState?.trumpRevealed])
 
   if (!room) return (
     <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}>
@@ -645,15 +693,109 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
           </div>
         )}
 
-        {/* Trump card on table — shown during bidding and playing */}
-        {gameState.trumpRevealed && gameState.trump && (gameState.phase === 'bidding' || gameState.phase === 'playing') && gameState.currentTrick.length === 0 && !trickJustResolved && (
+        {/* ── TRICK WIN TOAST ── */}
+        {trickWinToast && (
+          <div key={trickWinToast.key} style={{
+            position:'fixed',
+            left:'50%', transform:'translateX(-50%)',
+            ...(trickWinToast.isMe ? {bottom:160} : {top:110}),
+            zIndex:60, pointerEvents:'none',
+            animation: trickWinToast.isMe
+              ? 'trickToastMe 2.2s cubic-bezier(0.2,0,0.4,1) both'
+              : 'trickToastOpp 2.2s cubic-bezier(0.2,0,0.4,1) both',
+          }}>
+            <div style={{
+              display:'flex', alignItems:'center', gap:8,
+              background:'rgba(20,12,50,0.88)',
+              backdropFilter:'blur(16px)',
+              border:'1px solid rgba(245,200,66,0.5)',
+              borderRadius:40, padding:'10px 20px',
+              boxShadow:'0 4px 32px rgba(245,200,66,0.3), 0 0 0 1px rgba(245,200,66,0.15)',
+              whiteSpace:'nowrap',
+            }}>
+              <span style={{fontSize:20}}>🏆</span>
+              <span style={{
+                fontFamily:'Bebas Neue, sans-serif',
+                fontSize:20, letterSpacing:'0.08em',
+                color: trickWinToast.isMe ? 'var(--gold)' : 'var(--cream)',
+              }}>
+                {trickWinToast.isMe ? 'DITT STIKK!' : `${trickWinToast.name} tar stikket`}
+              </span>
+              {trickWinToast.isMe && <span style={{fontSize:18}}>⭐</span>}
+            </div>
+          </div>
+        )}
+
+        {/* ── TRUMP REVEAL OVERLAY — fullscreen dramatic moment ── */}
+        {trumpAnimating && trumpCardShown && (
+          <div style={{position:'fixed',inset:0,zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',
+            background:'rgba(10,5,30,0.92)',backdropFilter:'blur(12px)',
+            animation:'trumpOverlayIn 0.4s ease both'}}>
+
+            {/* Particle burst rings */}
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+              {[120,200,300].map((r,i) => (
+                <div key={i} style={{position:'absolute',width:r*2,height:r*2,borderRadius:'50%',
+                  border:`2px solid rgba(245,200,66,${0.6-i*0.18})`,
+                  animation:`trumpRing 0.8s ${i*0.15}s cubic-bezier(0.2,0,0.4,1) both`}} />
+              ))}
+              {/* Gold particle dots */}
+              {Array.from({length:12}).map((_,i) => {
+                const angle = (i/12)*360
+                return (
+                  <div key={i} style={{position:'absolute',width:6,height:6,borderRadius:'50%',
+                    background:'var(--gold)',
+                    animation:`trumpParticle 1s ${i*0.05}s cubic-bezier(0.2,0,0,1) both`,
+                    transformOrigin:`0 0`,
+                    transform:`rotate(${angle}deg) translateX(0px)`,
+                    '--angle': `${angle}deg`} as any} />
+                )
+              })}
+            </div>
+
+            {/* Main card flip */}
+            <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:20,position:'relative'}}>
+              {/* Suit glow behind card */}
+              <div style={{position:'absolute',width:180,height:180,borderRadius:'50%',
+                background: (['H','D'] as string[]).includes(trumpCardShown.suit)
+                  ? 'radial-gradient(circle,rgba(180,20,20,0.6) 0%,transparent 70%)'
+                  : 'radial-gradient(circle,rgba(30,30,120,0.6) 0%,transparent 70%)',
+                filter:'blur(20px)',animation:'trumpGlow 3s ease infinite'}} />
+
+              {/* The card itself */}
+              <div style={{animation:'trumpCardFlip 0.7s 0.2s cubic-bezier(0.34,1.2,0.64,1) both',
+                filter:`drop-shadow(0 0 32px ${(['H','D'] as string[]).includes(trumpCardShown.suit) ? 'rgba(200,30,30,0.8)' : 'rgba(80,80,255,0.8)'})`}}>
+                <CardComponent card={trumpCardShown as any} size="lg" />
+              </div>
+
+              {/* Trump announcement text */}
+              <div style={{textAlign:'center',animation:'trumpTextIn 0.5s 0.7s both'}}>
+                <p style={{fontFamily:'Bebas Neue,sans-serif',fontSize:14,letterSpacing:'0.3em',color:'rgba(255,248,231,0.5)',textTransform:'uppercase',marginBottom:4}}>
+                  Trumf er
+                </p>
+                <p style={{fontFamily:'Bebas Neue,sans-serif',fontSize:52,letterSpacing:'0.08em',lineHeight:1,
+                  color: (['H','D'] as string[]).includes(trumpCardShown.suit) ? '#f87171' : 'var(--cream)',
+                  textShadow: (['H','D'] as string[]).includes(trumpCardShown.suit)
+                    ? '0 0 40px rgba(200,30,30,0.9)' : '0 0 40px rgba(200,200,255,0.7)'}}>
+                  {({'S':'SPAR','H':'HJERTER','D':'RUTER','C':'KLØVER'} as any)[trumpCardShown.suit]}
+                </p>
+                <p style={{fontSize:40,marginTop:-4,animation:'trumpSuitBounce 0.4s 1s both'}}>
+                  {({'S':'♠','H':'♥','D':'♦','C':'♣'} as any)[trumpCardShown.suit]}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Trump card — small persistent display during bidding (not playing, shown in header) */}
+        {gameState.trumpRevealed && gameState.trump && gameState.phase === 'bidding' && gameState.currentTrick.length === 0 && !trickJustResolved && (
           <div style={{textAlign:'center',marginBottom:12}}>
-            <p className="text-muted" style={{fontSize:10,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:6}}>TRUMFKORT</p>
-            <div style={{display:'inline-block',animation:'trumpReveal 0.5s cubic-bezier(0.34,1.4,0.64,1) both'}}>
+            <div style={{display:'inline-block',animation:'trumpReveal 0.6s cubic-bezier(0.34,1.4,0.64,1) both',
+              filter:'drop-shadow(0 0 16px rgba(245,200,66,0.5))'}}>
               <CardComponent card={gameState.trump} size="md" />
             </div>
-            <p className="text-gold" style={{fontSize:11,marginTop:5,fontWeight:600}}>
-              {gameState.trump.suit === 'S' ? '♠ Spar' : gameState.trump.suit === 'H' ? '♥ Hjerter' : gameState.trump.suit === 'D' ? '♦ Ruter' : '♣ Kløver'} er trumf
+            <p className="text-gold" style={{fontSize:12,marginTop:6,fontWeight:600,letterSpacing:'0.05em'}}>
+              {({'S':'♠ Spar','H':'♥ Hjerter','D':'♦ Ruter','C':'♣ Kløver'} as any)[gameState.trump.suit]} er trumf
             </p>
           </div>
         )}
@@ -686,86 +828,75 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
           )
         })()}
 
-        {/* ── Drawing phase: deck pile + trump reveal ── */}
+        {/* ── Drawing phase: dramatic deck pile ── */}
         {gameState.phase === 'drawing' && (
-          <div className="glass float-in" style={{padding:24,width:'100%',maxWidth:340,textAlign:'center'}}>
-            <p className="text-gold" style={{fontSize:12,fontWeight:600,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:16}}>
-              Trekk trumfkort
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:20}}>
+            <p className="font-display text-gold" style={{fontSize:28,letterSpacing:'0.1em',textShadow:'0 0 20px rgba(245,200,66,0.5)'}}>
+              HVEM TREKKER?
             </p>
 
-            {/* Deck pile — stacked cards */}
-            <div style={{display:'flex',justifyContent:'center',alignItems:'flex-end',gap:24,marginBottom:20}}>
-              <div style={{textAlign:'center'}}>
-                <p className="text-muted" style={{fontSize:10,letterSpacing:'0.1em',marginBottom:8}}>BUNKE</p>
-                {/* Stack of face-down cards */}
-                <div style={{position:'relative',width:62,height:88,margin:'0 auto',cursor: isHost ? 'pointer' : 'default'}}
-                  onClick={isHost ? handleDrawTrump : undefined}>
-                  {Array.from({length:Math.min(gameState.deckPile.length,6)}).map((_,i) => (
-                    <div key={i} style={{
-                      position:'absolute',
-                      left: i*1.5, top: -i*1.5,
-                      width:62, height:88, borderRadius:8,
-                      background: i===Math.min(gameState.deckPile.length,6)-1
-                        ? 'linear-gradient(135deg,#4338ca 0%,#3730a3 100%)'
-                        : 'linear-gradient(135deg,#3730a3 0%,#2e27a0 100%)',
-                      border:'1px solid rgba(255,255,255,0.15)',
-                      boxShadow: i===Math.min(gameState.deckPile.length,6)-1
-                        ? '0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2)'
-                        : '0 2px 6px rgba(0,0,0,0.3)',
-                      transition:'all 0.2s',
-                    }}>
-                      {/* back pattern on top card */}
-                      {i===Math.min(gameState.deckPile.length,6)-1 && (
-                        <svg width="62" height="88" viewBox="0 0 70 100" style={{position:'absolute',inset:0,borderRadius:7}}>
-                          <rect width="70" height="100" rx="7" fill="#3730a3"/>
-                          <rect x="3" y="3" width="64" height="94" rx="5" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1"/>
-                          {Array.from({length:9},(_,r)=>Array.from({length:7},(_,c)=>(
-                            <path key={`${r}-${c}`} d={`M${c*11-2} ${r*12+6} L${c*11+3} ${r*12} L${c*11+8} ${r*12+6} L${c*11+3} ${r*12+12}Z`}
-                              fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5"/>
-                          )))}
-                        </svg>
-                      )}
-                    </div>
-                  ))}
-                  {gameState.deckPile.length === 0 && (
-                    <div style={{width:62,height:88,borderRadius:8,border:'2px dashed rgba(255,255,255,0.15)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <span className="text-muted" style={{fontSize:10}}>Tom</span>
-                    </div>
-                  )}
-                  {isHost && gameState.deckPile.length > 0 && (
-                    <div style={{position:'absolute',inset:0,borderRadius:8,background:'rgba(245,200,66,0.08)',border:'2px solid rgba(245,200,66,0.3)',
-                      display:'flex',alignItems:'center',justifyContent:'center',opacity:0,transition:'opacity 0.2s'}}
-                      onMouseOver={e=>(e.currentTarget.style.opacity='1')} onMouseOut={e=>(e.currentTarget.style.opacity='0')}>
-                      <span style={{fontSize:11,color:'var(--gold)',fontWeight:600}}>Trekk</span>
-                    </div>
-                  )}
-                </div>
-                <p className="text-muted" style={{fontSize:10,marginTop:6}}>{gameState.deckPile.length} kort igjen</p>
-              </div>
-
-              {/* Arrow */}
-              <div style={{fontSize:20,opacity:0.3,paddingBottom:24}}>→</div>
-
-              {/* Trump card slot */}
-              <div style={{textAlign:'center'}}>
-                <p className="text-muted" style={{fontSize:10,letterSpacing:'0.1em',marginBottom:8}}>TRUMF</p>
-                <div style={{width:62,height:88,borderRadius:8,border:'2px dashed rgba(255,255,255,0.15)',
-                  display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.1)'}}>
-                  <span className="text-muted" style={{fontSize:11}}>?</span>
-                </div>
-              </div>
+            {/* Big interactive deck */}
+            <div style={{position:'relative',cursor: isHost ? 'pointer' : 'default'}}
+              onClick={isHost ? handleDrawTrump : undefined}
+              className={isHost ? 'deck-hover-group' : ''}>
+              {/* Shadow glow under deck */}
+              <div style={{position:'absolute',bottom:-12,left:'50%',transform:'translateX(-50%)',
+                width:80,height:20,borderRadius:'50%',
+                background:'rgba(107,71,214,0.6)',filter:'blur(12px)'}} />
+              {/* Stacked cards */}
+              {Array.from({length:Math.min(gameState.deckPile.length,8)}).map((_,i,arr) => {
+                const isTop = i === arr.length-1
+                const tilt = (i - arr.length/2) * 0.6
+                return (
+                  <div key={i} style={{
+                    position: i===0 ? 'relative' : 'absolute',
+                    bottom: i*3, left: '50%',
+                    transform: `translateX(-50%) rotate(${tilt}deg)`,
+                    width:80, height:112, borderRadius:10,
+                    background: isTop ? 'linear-gradient(135deg,#4f46e5,#3730a3)' : 'linear-gradient(135deg,#3730a3,#2e27a0)',
+                    border: isTop ? '1px solid rgba(255,255,255,0.25)' : '1px solid rgba(255,255,255,0.1)',
+                    boxShadow: isTop
+                      ? '0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.25)'
+                      : '0 2px 8px rgba(0,0,0,0.4)',
+                    transition:'transform 0.2s',
+                    zIndex: i,
+                  }}>
+                    {isTop && (
+                      <svg width="80" height="112" viewBox="0 0 70 100" style={{position:'absolute',inset:0,borderRadius:9}}>
+                        <rect width="70" height="100" rx="8" fill="#3d35c0"/>
+                        <rect x="4" y="4" width="62" height="92" rx="6" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.2"/>
+                        <rect x="7" y="7" width="56" height="86" rx="4" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="0.6"/>
+                        {Array.from({length:8},(_,r)=>Array.from({length:6},(_,c)=>(
+                          <path key={`${r}-${c}`} d={`M${c*12} ${r*14+7} L${c*12+6} ${r*14} L${c*12+12} ${r*14+7} L${c*12+6} ${r*14+14}Z`}
+                            fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="0.6"/>
+                        )))}
+                        {isHost && <text x="35" y="56" textAnchor="middle" fontSize="22" fill="rgba(245,200,66,0.6)" fontFamily="serif">✦</text>}
+                      </svg>
+                    )}
+                  </div>
+                )
+              })}
+              {/* Hover/tap ring for host */}
+              {isHost && (
+                <div style={{position:'absolute',inset:-6,borderRadius:16,
+                  border:'2px solid rgba(245,200,66,0.5)',
+                  boxShadow:'0 0 24px rgba(245,200,66,0.25)',
+                  animation:'pulse-ring 2s infinite',pointerEvents:'none'}} />
+              )}
             </div>
 
+            <p className="text-muted" style={{fontSize:12}}>{gameState.deckPile.length} kort i bunken</p>
+
             {isHost ? (
-              <button onClick={handleDrawTrump} disabled={gameState.deckPile.length===0} className="btn-gold" style={{width:'100%',padding:13}}>
+              <button onClick={handleDrawTrump} disabled={gameState.deckPile.length===0} className="btn-gold"
+                style={{padding:'14px 32px',fontSize:15,borderRadius:16}}>
                 🂠 Trekk trumfkort
               </button>
             ) : (
-              <p className="text-muted" style={{fontSize:12}}>Venter på at verten trekker trumfkort...</p>
+              <div className="glass-sm" style={{padding:'10px 20px',background:'rgba(0,0,0,0.2)'}}>
+                <p className="text-muted" style={{fontSize:12,textAlign:'center'}}>Venter på at verten trekker...</p>
+              </div>
             )}
-            <p className="text-muted" style={{fontSize:10,marginTop:8,opacity:0.6}}>
-              {gameState.deckPile.length} kort igjen i bunken (ikke i spill)
-            </p>
           </div>
         )}
 
