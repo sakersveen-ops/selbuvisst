@@ -324,7 +324,7 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
       </div>
 
       {/* Side panel overlay */}
-      {sidePanel !== 'none' && sidePanel !== 'roundScores' && (
+      {sidePanel !== 'none' && (sidePanel as string) !== 'roundScores' && (
         <div style={{position:'absolute',top:57,right:0,width:'min(340px,100vw)',zIndex:10,padding:12}}>
           <div style={{display:'flex',gap:6,marginBottom:8}}>
             <button onClick={() => setSidePanel('roomBoard')} className={sidePanel==='roomBoard' ? 'btn-gold' : 'btn-glass'} style={{flex:1,padding:'8px 0',fontSize:12}}>🃏 Romstatistikk</button>
