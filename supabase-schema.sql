@@ -1,16 +1,23 @@
 -- Run this in your Supabase SQL editor
+-- (safe to re-run; uses IF NOT EXISTS and DROP POLICY IF EXISTS)
 
--- Rooms table (game sessions)
+-- Rooms table
 create table if not exists rooms (
   id uuid default gen_random_uuid() primary key,
   code text unique not null,
   host_id uuid references auth.users(id),
   host_name text,
   players jsonb default '[]'::jsonb,
+  max_players integer default 5,
+  max_rounds integer default 10,
   state jsonb,
   bid_staging jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
+
+-- Add columns if upgrading from old schema
+alter table rooms add column if not exists max_players integer default 5;
+alter table rooms add column if not exists max_rounds integer default 10;
 
 -- Scores table (permanent leaderboard)
 create table if not exists scores (
@@ -22,26 +29,21 @@ create table if not exists scores (
   played_at timestamptz default now()
 );
 
--- Enable Row Level Security
+-- RLS
 alter table rooms enable row level security;
 alter table scores enable row level security;
 
--- Rooms: anyone authenticated can read/write (game rooms are shared)
-create policy "Authenticated users can read rooms"
-  on rooms for select to authenticated using (true);
+drop policy if exists "rooms_select" on rooms;
+drop policy if exists "rooms_insert" on rooms;
+drop policy if exists "rooms_update" on rooms;
+drop policy if exists "scores_select" on scores;
+drop policy if exists "scores_insert" on scores;
 
-create policy "Authenticated users can insert rooms"
-  on rooms for insert to authenticated with check (true);
+create policy "rooms_select" on rooms for select to authenticated using (true);
+create policy "rooms_insert" on rooms for insert to authenticated with check (true);
+create policy "rooms_update" on rooms for update to authenticated using (true);
+create policy "scores_select" on scores for select using (true);
+create policy "scores_insert" on scores for insert to authenticated with check (true);
 
-create policy "Authenticated users can update rooms"
-  on rooms for update to authenticated using (true);
-
--- Scores: anyone can read, authenticated can insert their own
-create policy "Anyone can read scores"
-  on scores for select using (true);
-
-create policy "Authenticated users can insert scores"
-  on scores for insert to authenticated with check (true);
-
--- Enable realtime for rooms table
+-- Realtime
 alter publication supabase_realtime add table rooms;
