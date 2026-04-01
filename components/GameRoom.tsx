@@ -374,7 +374,7 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
   // ── SPECTATOR VIEW ────────────────────────────────────────────────────────
   const isSpectator = isHost && (spectatorMode || !gameState.players.find(p => p.id === userId))
 
-  if (isSpectator && gameState.phase !== 'gameEnd' && gameState.phase !== 'roundEnd') {
+  if (isSpectator && (gameState.phase as string) !== 'gameEnd' && (gameState.phase as string) !== 'roundEnd') {
     const rPlayed = roundsPlayed(gameState)
     const rTotal  = totalRounds(gameState)
     const trumpSuitS = gameState.trump?.suit
