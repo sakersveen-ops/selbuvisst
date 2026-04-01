@@ -18,6 +18,7 @@ create table if not exists rooms (
 -- Add columns if upgrading from old schema
 alter table rooms add column if not exists max_players integer default 5;
 alter table rooms add column if not exists max_rounds integer default 10;
+alter table rooms add column if not exists kicked jsonb default '[]'::jsonb;
 
 -- Scores table (permanent leaderboard)
 create table if not exists scores (

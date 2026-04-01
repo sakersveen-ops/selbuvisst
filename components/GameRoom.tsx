@@ -74,6 +74,9 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
     fetchRoom()
     const ch = supabase.channel(`room:${roomCode}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `code=eq.${roomCode}` }, payload => {
+        // Check if this user was kicked
+        const kicked: string[] = payload.new.kicked || []
+        if (kicked.includes(userId)) { onLeave(); return }
         setRoom(payload.new)
         if (payload.new.state) {
           const incoming: GameState = payload.new.state
@@ -109,6 +112,15 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
 
   async function updateLobbySettings(mp: number, mr: number) {
     await supabase.from('rooms').update({ max_players: mp, max_rounds: mr }).eq('code', roomCode)
+  }
+
+  async function kickPlayer(playerId: string) {
+    if (!isHost || playerId === userId) return
+    const { data } = await supabase.from('rooms').select('players,kicked').eq('code', roomCode).single()
+    if (!data) return
+    const newPlayers = (data.players || []).filter((p: any) => p.id !== playerId)
+    const kicked = [...(data.kicked || []), playerId]
+    await supabase.from('rooms').update({ players: newPlayers, kicked }).eq('code', roomCode)
   }
 
   function startGame() {
@@ -317,6 +329,16 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
                     </div>
                     <span className="text-cream" style={{fontSize:14,flex:1}}>{p.name}</span>
                     {p.id === room.host_id && <span className="text-gold" style={{fontSize:11,opacity:0.7}}>vertskap</span>}
+                    {isHost && p.id !== userId && p.id !== room.host_id && (
+                      <button onClick={() => kickPlayer(p.id)}
+                        style={{background:'rgba(248,113,113,0.12)',border:'1px solid rgba(248,113,113,0.3)',
+                          borderRadius:8,padding:'4px 10px',fontSize:11,color:'#f87171',cursor:'pointer',
+                          transition:'all 0.15s',flexShrink:0}}
+                        onMouseOver={e=>{e.currentTarget.style.background='rgba(248,113,113,0.25)'}}
+                        onMouseOut={e=>{e.currentTarget.style.background='rgba(248,113,113,0.12)'}}>
+                        Kast ut
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div key={`empty-${i}`} style={{padding:'10px 14px',display:'flex',alignItems:'center',gap:10,border:'1px dashed rgba(255,255,255,0.12)',borderRadius:14,opacity:0.4}}>
