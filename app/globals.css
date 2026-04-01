@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --felt: #1a472a;
+  --felt2: #15391f;
+  --gold: #c9a84c;
+  --gold2: #e8c96a;
+  --card-bg: #f5f0e8;
+}
+
+body {
+  background-color: var(--felt);
+  background-image: 
+    radial-gradient(ellipse at 20% 50%, #1f5c34 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 20%, #0f2e18 0%, transparent 40%);
+  min-height: 100vh;
+  color: #f5f0e8;
+  font-family: Georgia, serif;
+}
+
+.card-suit { font-size: 1.2em; }
+.card-red { color: #cc2200; }
+.card-black { color: #1a1a1a; }
+
+@keyframes dealIn {
+  from { transform: translateY(-30px) rotate(-3deg); opacity: 0; }
+  to { transform: translateY(0) rotate(0deg); opacity: 1; }
+}
+@keyframes pulse-gold {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(201, 168, 76, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(201, 168, 76, 0); }
+}
+
+.card-deal { animation: dealIn 0.3s ease-out forwards; }
+.pulse-gold { animation: pulse-gold 2s infinite; }
