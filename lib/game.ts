@@ -16,12 +16,14 @@ export interface GameState {
   startRound: number
   minRound: number
   trump: Card | null
+  trumpRevealed: boolean        // ← false until host draws from deck
+  deckPile: Card[]              // ← remaining cards after dealing (shown as draw pile)
   currentTrick: TrickPlay[]
-  lastTrick: TrickPlay[] | null          // ← NEW: last completed trick
-  lastTrickWinnerId: string | null       // ← NEW: who won last trick
+  lastTrick: TrickPlay[] | null
+  lastTrickWinnerId: string | null
   leadSuit: Suit | null
   currentPlayerIndex: number
-  phase: 'bidding' | 'playing' | 'roundEnd' | 'gameEnd'
+  phase: 'drawing' | 'bidding' | 'playing' | 'roundEnd' | 'gameEnd'
   unseenBid: boolean
   scores: { [playerId: string]: number[] }
   roomCode: string
@@ -73,12 +75,14 @@ export function initGame(
     startRound,
     minRound: 1,
     trump: null,
+    trumpRevealed: false,
+    deckPile: [],
     currentTrick: [],
     lastTrick: null,
     lastTrickWinnerId: null,
     leadSuit: null,
     currentPlayerIndex: 0,
-    phase: 'bidding',
+    phase: 'drawing',
     unseenBid: false,
     scores: Object.fromEntries(players.map(p => [p.id, []])),
     roomCode,
@@ -95,15 +99,42 @@ export function dealRound(state: GameState): GameState {
     bid: null,
     tricks: 0,
   }))
-  const trumpCard = deck[n * cpp] || null
+  // Remaining cards form the draw pile (trump will be drawn from top)
+  const remainingDeck = deck.slice(n * cpp)
   return {
     ...state,
     players: newPlayers,
-    trump: trumpCard,
+    trump: null,
+    trumpRevealed: false,
+    deckPile: remainingDeck,
     currentTrick: [],
     lastTrick: null,
     lastTrickWinnerId: null,
     leadSuit: null,
+    phase: 'drawing',          // wait for trump draw
+    unseenBid: false,
+  }
+}
+
+// Host draws top card from pile — reveals trump, transitions to bidding/unseenBid
+export function drawTrump(state: GameState): GameState {
+  if (state.deckPile.length === 0) {
+    // No cards left (very full table) — no trump this round
+    return {
+      ...state,
+      trump: null,
+      trumpRevealed: true,
+      phase: state.round === state.minRound ? 'bidding' : 'bidding',
+      unseenBid: state.round === state.minRound,
+    }
+  }
+  const trumpCard = state.deckPile[0]
+  const remainingPile = state.deckPile.slice(1)
+  return {
+    ...state,
+    trump: trumpCard,
+    trumpRevealed: true,
+    deckPile: remainingPile,
     phase: 'bidding',
     unseenBid: state.round === state.minRound,
   }
@@ -127,7 +158,6 @@ export function playCard(state: GameState, playerId: string, card: Card): GameSt
     return { ...state, players: newPlayers, currentTrick: newTrick, leadSuit, currentPlayerIndex: (state.currentPlayerIndex + 1) % state.players.length }
   }
 
-  // Resolve trick
   const trump = state.trump?.suit ?? null
   let winner = newTrick[0]
   for (const play of newTrick.slice(1)) {
@@ -145,25 +175,16 @@ export function playCard(state: GameState, playerId: string, card: Card): GameSt
     for (const p of scoredPlayers) newScores[p.id] = [...(newScores[p.id] ?? []), p.score]
     const isGameEnd = state.round === state.minRound
     return {
-      ...state,
-      players: scoredPlayers,
-      currentTrick: [],
-      lastTrick: newTrick,
-      lastTrickWinnerId: winner.playerId,
-      leadSuit: null,
-      phase: isGameEnd ? 'gameEnd' : 'roundEnd',
-      scores: newScores,
+      ...state, players: scoredPlayers, currentTrick: [], lastTrick: newTrick,
+      lastTrickWinnerId: winner.playerId, leadSuit: null,
+      phase: isGameEnd ? 'gameEnd' : 'roundEnd', scores: newScores,
     }
   }
 
   return {
-    ...state,
-    players: resolvedPlayers,
-    currentTrick: [],
-    lastTrick: newTrick,
-    lastTrickWinnerId: winner.playerId,
-    leadSuit: null,
-    currentPlayerIndex: winnerIdx,
+    ...state, players: resolvedPlayers, currentTrick: [],
+    lastTrick: newTrick, lastTrickWinnerId: winner.playerId,
+    leadSuit: null, currentPlayerIndex: winnerIdx,
   }
 }
 

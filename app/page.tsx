@@ -166,6 +166,12 @@ export default function Home() {
           <div style={{display:'flex',justifyContent:'center',gap:12,marginTop:10,fontSize:20,opacity:0.6}}>
             <span>♠</span><span style={{color:'#c0392b'}}>♥</span><span style={{color:'#c0392b'}}>♦</span><span>♣</span>
           </div>
+          {joining && (
+            <div style={{marginTop:14,background:'rgba(245,200,66,0.12)',border:'1px solid rgba(245,200,66,0.3)',borderRadius:12,padding:'10px 18px',display:'inline-block'}}>
+              <p style={{fontSize:12,color:'var(--gold)',fontWeight:600}}>🎴 Du er invitert til rom <span style={{letterSpacing:'0.15em'}}>{joining}</span></p>
+              <p className="text-muted" style={{fontSize:11,marginTop:3}}>Logg inn eller spill som gjest for å bli med</p>
+            </div>
+          )}
         </div>
 
         {/* Mode tabs */}

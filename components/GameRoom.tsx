@@ -32,7 +32,7 @@ function QRCodeDisplay({ url }: { url: string }) {
   )
 }
 import { createClient } from '@/lib/supabase'
-import { GameState, Card, initGame, dealRound, submitBids, playCard, nextRound, SUIT_SYMBOLS, isRedSuit, totalRounds, roundsPlayed, rankValue } from '@/lib/game'
+import { GameState, Card, initGame, dealRound, submitBids, playCard, nextRound, drawTrump, SUIT_SYMBOLS, isRedSuit, totalRounds, roundsPlayed, rankValue } from '@/lib/game'
 import CardComponent from './CardComponent'
 import ScoreBoard from './ScoreBoard'
 import RoomLeaderboard from './RoomLeaderboard'
@@ -52,6 +52,8 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
   // Lobby settings (host only)
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [maxRounds, setMaxRounds] = useState(10)
+  const [spectatorMode, setSpectatorMode] = useState(false)
+  const [spectateTarget, setSpectateTarget] = useState<string | null>(null) // which player to focus
   const supabase = createClient()
   const isHost = room?.host_id === userId
 
@@ -92,7 +94,10 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
 
   function startGame() {
     if (!room) return
-    const state = dealRound(initGame(room.players, maxRounds, roomCode))
+    const activePlayers = spectatorMode
+      ? room.players.filter((p: any) => p.id !== userId)
+      : room.players
+    const state = dealRound(initGame(activePlayers, maxRounds, roomCode))
     updateState(state)
   }
 
@@ -144,6 +149,11 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
   function handleNextRound() {
     if (!gameState) return
     updateState(nextRound(gameState)); setSidePanel('none')
+  }
+
+  function handleDrawTrump() {
+    if (!gameState || !isHost) return
+    updateState(drawTrump(gameState))
   }
 
   if (!room) return (
@@ -218,6 +228,27 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
                     </div>
                     <p className="text-muted" style={{fontSize:10,marginTop:6,textAlign:'center'}}>Kort {maxRounds} → 1</p>
                   </div>
+                </div>
+
+                {/* Spectator toggle */}
+                <div style={{marginTop:14,paddingTop:14,borderTop:'1px solid rgba(245,200,66,0.15)'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div>
+                      <p className="text-cream" style={{fontSize:13,fontWeight:500}}>Spill som tilskuer</p>
+                      <p className="text-muted" style={{fontSize:11,marginTop:2}}>Se alle spillernes kort uten å delta</p>
+                    </div>
+                    <button onClick={() => setSpectatorMode(m => !m)}
+                      style={{width:44,height:26,borderRadius:13,border:'none',cursor:'pointer',transition:'all 0.2s',position:'relative',flexShrink:0,
+                        background: spectatorMode ? 'linear-gradient(135deg,var(--gold),#e8a820)' : 'rgba(255,255,255,0.12)'}}>
+                      <div style={{position:'absolute',top:3,left: spectatorMode ? 21 : 3,width:20,height:20,borderRadius:'50%',background:'#fff',transition:'left 0.2s',boxShadow:'0 1px 4px rgba(0,0,0,0.3)'}} />
+                    </button>
+                  </div>
+                  {spectatorMode && (
+                    <div style={{marginTop:8,padding:'6px 10px',background:'rgba(245,200,66,0.08)',borderRadius:8,display:'flex',alignItems:'center',gap:6}}>
+                      <span style={{fontSize:14}}>👁</span>
+                      <p className="text-muted" style={{fontSize:11}}>Du starter spillet men deltar ikke. Du ser alle kortene.</p>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -340,6 +371,155 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
     )
   }
 
+  // ── SPECTATOR VIEW ────────────────────────────────────────────────────────
+  const isSpectator = isHost && (spectatorMode || !gameState.players.find(p => p.id === userId))
+
+  if (isSpectator && gameState.phase !== 'gameEnd' && gameState.phase !== 'roundEnd') {
+    const rPlayed = roundsPlayed(gameState)
+    const rTotal  = totalRounds(gameState)
+    const trumpSuitS = gameState.trump?.suit
+    const focusPlayer = spectateTarget
+      ? gameState.players.find(p => p.id === spectateTarget)
+      : null
+
+    return (
+      <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',position:'relative',background:'rgba(0,0,0,0.15)'}}>
+        <div className="orb orb-2" style={{opacity:0.2}} />
+
+        {/* Spectator header */}
+        <div style={{background:'rgba(0,0,0,0.45)',backdropFilter:'blur(20px)',borderBottom:'1px solid rgba(245,200,66,0.2)',padding:'10px 14px',display:'flex',alignItems:'center',gap:10,position:'relative',zIndex:2}}>
+          <button onClick={onLeave} style={{background:'none',border:'none',color:'rgba(255,248,231,0.35)',cursor:'pointer',fontSize:16,padding:0,flexShrink:0}}>←</button>
+          <div style={{flex:1}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <span className="font-display text-gold" style={{fontSize:20,letterSpacing:'0.1em'}}>{roomCode}</span>
+              <span style={{fontSize:10,background:'rgba(245,200,66,0.15)',border:'1px solid rgba(245,200,66,0.35)',borderRadius:6,padding:'2px 7px',color:'var(--gold)',letterSpacing:'0.1em'}}>TILSKUER</span>
+            </div>
+            <div style={{height:3,background:'rgba(255,255,255,0.1)',borderRadius:2,marginTop:4,overflow:'hidden',maxWidth:120}}>
+              <div style={{height:'100%',background:'var(--gold)',borderRadius:2,width:`${(rPlayed/rTotal)*100}%`}} />
+            </div>
+          </div>
+          {trumpSuitS && (
+            <div className="trump-badge" style={{display:'flex',alignItems:'center',gap:5,padding:'4px 10px'}}>
+              <span className="text-muted" style={{fontSize:10}}>TRUMF</span>
+              <span style={{fontSize:20,color: isRedSuit(trumpSuitS)?'#e05252':'var(--cream)'}}>{SUIT_SYMBOLS[trumpSuitS]}</span>
+            </div>
+          )}
+          {/* Toggle back to playing view */}
+          <button onClick={() => setSpectatorMode(false)} className="btn-glass"
+            style={{padding:'6px 12px',fontSize:11,flexShrink:0,border:'1px solid rgba(245,200,66,0.4)',color:'var(--gold)'}}>
+            👁 Av
+          </button>
+        </div>
+
+        {/* Current trick center */}
+        {gameState.currentTrick.length > 0 && (
+          <div style={{padding:'12px 14px 0',textAlign:'center',position:'relative',zIndex:1}}>
+            <p className="text-muted" style={{fontSize:10,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:8}}>STIKK PÅGÅR</p>
+            <div style={{display:'flex',gap:10,justifyContent:'center'}}>
+              {gameState.currentTrick.map(({playerId,card}) => {
+                const player = gameState.players.find(p=>p.id===playerId)
+                return (
+                  <div key={playerId} style={{textAlign:'center'}}>
+                    <CardComponent card={card} size="md"/>
+                    <p className="text-muted" style={{fontSize:10,marginTop:3}}>{player?.name?.split(' ')[0]}</p>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Player selector tabs */}
+        <div style={{padding:'10px 10px 0',display:'flex',gap:6,overflowX:'auto',position:'relative',zIndex:1}}>
+          <button onClick={() => setSpectateTarget(null)}
+            style={{flexShrink:0,padding:'6px 12px',borderRadius:10,border:'none',cursor:'pointer',fontSize:12,fontWeight:500,transition:'all 0.15s',
+              background: !spectateTarget ? 'linear-gradient(135deg,var(--gold),#e8a820)' : 'rgba(255,255,255,0.08)',
+              color: !spectateTarget ? 'var(--purple-deep)' : 'rgba(255,248,231,0.6)'}}>
+            Alle
+          </button>
+          {gameState.players.map(p => (
+            <button key={p.id} onClick={() => setSpectateTarget(p.id)}
+              style={{flexShrink:0,padding:'6px 12px',borderRadius:10,border:'none',cursor:'pointer',fontSize:12,fontWeight:500,transition:'all 0.15s',
+                background: spectateTarget===p.id ? 'linear-gradient(135deg,var(--gold),#e8a820)' : 'rgba(255,255,255,0.08)',
+                color: spectateTarget===p.id ? 'var(--purple-deep)' : 'rgba(255,248,231,0.6)',
+                outline: gameState.players[gameState.currentPlayerIndex]?.id===p.id ? '1px solid var(--gold)' : 'none'}}>
+              {p.name.split(' ')[0]}
+              {gameState.players[gameState.currentPlayerIndex]?.id===p.id && ' ▶'}
+            </button>
+          ))}
+        </div>
+
+        {/* Hands — all visible */}
+        <div style={{flex:1,overflowY:'auto',padding:'12px 10px 24px',position:'relative',zIndex:1}}>
+          {(focusPlayer ? [focusPlayer] : gameState.players).map(p => {
+            const isTurn = gameState.players[gameState.currentPlayerIndex]?.id === p.id
+            const bidDone = p.bid !== null
+            return (
+              <div key={p.id} style={{marginBottom:14}}>
+                {/* Player info bar */}
+                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,padding:'8px 12px',borderRadius:12,
+                  background: isTurn ? 'rgba(245,200,66,0.1)' : 'rgba(0,0,0,0.2)',
+                  border: isTurn ? '1px solid rgba(245,200,66,0.3)' : '1px solid rgba(255,255,255,0.07)'}}>
+                  <div style={{width:28,height:28,borderRadius:'50%',background:'linear-gradient(135deg,var(--purple-bright),var(--purple-mid))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,flexShrink:0}}>
+                    {p.name.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="text-cream" style={{flex:1,fontSize:13,fontWeight:500}}>{p.name}</span>
+                  {isTurn && <span style={{fontSize:10,color:'var(--gold)',fontWeight:600}}>TUR ▶</span>}
+                  <span className="text-muted" style={{fontSize:11}}>{bidDone ? `Meldt: ${p.bid}` : gameState.phase==='bidding' ? '...' : '–'}</span>
+                  <span className="text-muted" style={{fontSize:11}}>Stikk: {p.tricks}</span>
+                  {/* Trick pile mini */}
+                  {p.tricks > 0 && (
+                    <div style={{display:'flex',alignItems:'center',gap:3}}>
+                      <div style={{position:'relative',height:22,width:Math.min(p.tricks*4+14,38)}}>
+                        {Array.from({length:Math.min(p.tricks,4)}).map((_,ti)=>(
+                          <div key={ti} style={{position:'absolute',left:ti*Math.min(6,30/Math.max(p.tricks-1,1)),top:0,width:14,height:20,borderRadius:2,
+                            background:'linear-gradient(160deg,#fffef5,#e8dfc8)',border:'1px solid rgba(150,120,60,0.4)',boxShadow:'1px 1px 3px rgba(0,0,0,0.35)'}} />
+                        ))}
+                      </div>
+                      <span style={{fontSize:10,fontWeight:700,color:'var(--gold)',fontFamily:'Bebas Neue,sans-serif'}}>×{p.tricks}</span>
+                    </div>
+                  )}
+                  <span className="font-display text-gold" style={{fontSize:18}}>{p.totalScore}</span>
+                </div>
+
+                {/* Hand — face up for spectator */}
+                <div style={{display:'flex',gap:3,flexWrap:'wrap',paddingLeft:8}}>
+                  {[...p.hand].sort((a,b) => {
+                    const SO: Record<string,number> = {S:0,H:1,D:2,C:3}
+                    const trump = gameState.trump?.suit
+                    const aT = a.suit===trump?1:0, bT = b.suit===trump?1:0
+                    if (aT!==bT) return aT-bT
+                    if (a.suit!==b.suit) return SO[a.suit]-SO[b.suit]
+                    return rankValue(a.rank)-rankValue(b.rank)
+                  }).map((card,i) => (
+                    <CardComponent key={`${p.id}${card.suit}${card.rank}${i}`}
+                      card={card} size="sm" dealDelay={i*20} />
+                  ))}
+                  {gameState.phase === 'bidding' && <span className="text-muted" style={{fontSize:11,alignSelf:'center',marginLeft:4}}>byr...</span>}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Spectator bottom bar — bidding reveals */}
+        {gameState.phase === 'bidding' && (
+          <div style={{background:'rgba(0,0,0,0.4)',backdropFilter:'blur(16px)',borderTop:'1px solid rgba(255,255,255,0.08)',padding:'10px 14px',position:'relative',zIndex:2}}>
+            <p className="text-gold" style={{fontSize:11,fontWeight:600,letterSpacing:'0.1em',textTransform:'uppercase',marginBottom:6}}>Bud (skjult til alle har lagt inn)</p>
+            <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              {gameState.players.map(p => (
+                <div key={p.id} style={{padding:'5px 10px',borderRadius:8,background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.1)'}}>
+                  <span className="text-muted" style={{fontSize:11}}>{p.name.split(' ')[0]}: </span>
+                  <span className="text-gold" style={{fontSize:11,fontWeight:700}}>{p.bid !== null ? p.bid : '?'}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   // ── MAIN GAME ─────────────────────────────────────────────────────────────
   const rPlayed = roundsPlayed(gameState)
   const rTotal = totalRounds(gameState)
@@ -367,6 +547,12 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
             <span className="text-muted" style={{fontSize:10,letterSpacing:'0.1em'}}>TRUMF</span>
             <span style={{fontSize:20,color: isRedSuit(trumpSuit) ? '#e05252' : 'var(--cream)'}}>{SUIT_SYMBOLS[trumpSuit]}</span>
           </div>
+        )}
+        {isHost && (
+          <button onClick={() => setSpectatorMode(true)} className="btn-glass"
+            style={{padding:'6px 10px',fontSize:12,flexShrink:0,border:'1px solid rgba(255,255,255,0.15)'}}>
+            👁
+          </button>
         )}
         <button onClick={() => setSidePanel(p => p!=='none' ? 'none' : 'roomBoard')}
           className="btn-glass" style={{padding:'6px 12px',fontSize:12,flexShrink:0}}>
@@ -400,12 +586,23 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
             </div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:11}}>
               <span className="text-muted">{p.bid!==null ? `${p.bid}↗` : '...'}</span>
-              {/* Trick pile: stacked mini cards */}
-              <div style={{position:'relative',height:28,width: Math.max(p.tricks*6+18,22)}}>
-                {Array.from({length: p.tricks}).map((_,ti) => (
-                  <div key={ti} style={{position:'absolute',left:ti*6,top:0,width:18,height:26,borderRadius:3,background:'linear-gradient(160deg,#fffef5,#f0ead8)',border:'1px solid rgba(0,0,0,0.15)',boxShadow:'1px 1px 3px rgba(0,0,0,0.25)'}} />
-                ))}
-                {p.tricks === 0 && <span className="text-muted" style={{fontSize:10,lineHeight:'28px'}}>—</span>}
+              {/* Trick pile */}
+              <div style={{display:'flex',alignItems:'center',gap:5}}>
+                {p.tricks > 0 ? (
+                  <>
+                    <div style={{position:'relative',height:30,width:Math.min(p.tricks*5+20,52),flexShrink:0}}>
+                      {Array.from({length:Math.min(p.tricks,5)}).map((_,ti) => (
+                        <div key={ti} style={{position:'absolute',left:ti*Math.min(8,44/Math.max(p.tricks-1,1)),top:0,width:20,height:28,borderRadius:3,
+                          background:'linear-gradient(160deg,#fffef5,#e8dfc8)',
+                          border:'1px solid rgba(150,120,60,0.4)',
+                          boxShadow:'1px 2px 4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.8)'}} />
+                      ))}
+                    </div>
+                    <span style={{fontSize:11,fontWeight:700,color:'var(--gold)',fontFamily:'Bebas Neue,sans-serif',letterSpacing:'0.05em'}}>×{p.tricks}</span>
+                  </>
+                ) : (
+                  <span className="text-muted" style={{fontSize:10}}>—</span>
+                )}
               </div>
               <span className="font-display text-gold" style={{fontSize:15}}>{p.totalScore}</span>
             </div>
@@ -448,6 +645,19 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
           </div>
         )}
 
+        {/* Trump card on table — shown during bidding and playing */}
+        {gameState.trumpRevealed && gameState.trump && (gameState.phase === 'bidding' || gameState.phase === 'playing') && gameState.currentTrick.length === 0 && !trickJustResolved && (
+          <div style={{textAlign:'center',marginBottom:12}}>
+            <p className="text-muted" style={{fontSize:10,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:6}}>TRUMFKORT</p>
+            <div style={{display:'inline-block',animation:'trumpReveal 0.5s cubic-bezier(0.34,1.4,0.64,1) both'}}>
+              <CardComponent card={gameState.trump} size="md" />
+            </div>
+            <p className="text-gold" style={{fontSize:11,marginTop:5,fontWeight:600}}>
+              {gameState.trump.suit === 'S' ? '♠ Spar' : gameState.trump.suit === 'H' ? '♥ Hjerter' : gameState.trump.suit === 'D' ? '♦ Ruter' : '♣ Kløver'} er trumf
+            </p>
+          </div>
+        )}
+
         {/* Current trick — lingers after resolution */}
         {(gameState.currentTrick.length > 0 || trickJustResolved) && (() => {
           const trickToShow = trickJustResolved ? gameState.lastTrick : gameState.currentTrick
@@ -476,7 +686,90 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
           )
         })()}
 
-        {/* Bidding */}
+        {/* ── Drawing phase: deck pile + trump reveal ── */}
+        {gameState.phase === 'drawing' && (
+          <div className="glass float-in" style={{padding:24,width:'100%',maxWidth:340,textAlign:'center'}}>
+            <p className="text-gold" style={{fontSize:12,fontWeight:600,letterSpacing:'0.15em',textTransform:'uppercase',marginBottom:16}}>
+              Trekk trumfkort
+            </p>
+
+            {/* Deck pile — stacked cards */}
+            <div style={{display:'flex',justifyContent:'center',alignItems:'flex-end',gap:24,marginBottom:20}}>
+              <div style={{textAlign:'center'}}>
+                <p className="text-muted" style={{fontSize:10,letterSpacing:'0.1em',marginBottom:8}}>BUNKE</p>
+                {/* Stack of face-down cards */}
+                <div style={{position:'relative',width:62,height:88,margin:'0 auto',cursor: isHost ? 'pointer' : 'default'}}
+                  onClick={isHost ? handleDrawTrump : undefined}>
+                  {Array.from({length:Math.min(gameState.deckPile.length,6)}).map((_,i) => (
+                    <div key={i} style={{
+                      position:'absolute',
+                      left: i*1.5, top: -i*1.5,
+                      width:62, height:88, borderRadius:8,
+                      background: i===Math.min(gameState.deckPile.length,6)-1
+                        ? 'linear-gradient(135deg,#4338ca 0%,#3730a3 100%)'
+                        : 'linear-gradient(135deg,#3730a3 0%,#2e27a0 100%)',
+                      border:'1px solid rgba(255,255,255,0.15)',
+                      boxShadow: i===Math.min(gameState.deckPile.length,6)-1
+                        ? '0 4px 16px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.2)'
+                        : '0 2px 6px rgba(0,0,0,0.3)',
+                      transition:'all 0.2s',
+                    }}>
+                      {/* back pattern on top card */}
+                      {i===Math.min(gameState.deckPile.length,6)-1 && (
+                        <svg width="62" height="88" viewBox="0 0 70 100" style={{position:'absolute',inset:0,borderRadius:7}}>
+                          <rect width="70" height="100" rx="7" fill="#3730a3"/>
+                          <rect x="3" y="3" width="64" height="94" rx="5" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1"/>
+                          {Array.from({length:9},(_,r)=>Array.from({length:7},(_,c)=>(
+                            <path key={`${r}-${c}`} d={`M${c*11-2} ${r*12+6} L${c*11+3} ${r*12} L${c*11+8} ${r*12+6} L${c*11+3} ${r*12+12}Z`}
+                              fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="0.5"/>
+                          )))}
+                        </svg>
+                      )}
+                    </div>
+                  ))}
+                  {gameState.deckPile.length === 0 && (
+                    <div style={{width:62,height:88,borderRadius:8,border:'2px dashed rgba(255,255,255,0.15)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <span className="text-muted" style={{fontSize:10}}>Tom</span>
+                    </div>
+                  )}
+                  {isHost && gameState.deckPile.length > 0 && (
+                    <div style={{position:'absolute',inset:0,borderRadius:8,background:'rgba(245,200,66,0.08)',border:'2px solid rgba(245,200,66,0.3)',
+                      display:'flex',alignItems:'center',justifyContent:'center',opacity:0,transition:'opacity 0.2s'}}
+                      onMouseOver={e=>(e.currentTarget.style.opacity='1')} onMouseOut={e=>(e.currentTarget.style.opacity='0')}>
+                      <span style={{fontSize:11,color:'var(--gold)',fontWeight:600}}>Trekk</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-muted" style={{fontSize:10,marginTop:6}}>{gameState.deckPile.length} kort igjen</p>
+              </div>
+
+              {/* Arrow */}
+              <div style={{fontSize:20,opacity:0.3,paddingBottom:24}}>→</div>
+
+              {/* Trump card slot */}
+              <div style={{textAlign:'center'}}>
+                <p className="text-muted" style={{fontSize:10,letterSpacing:'0.1em',marginBottom:8}}>TRUMF</p>
+                <div style={{width:62,height:88,borderRadius:8,border:'2px dashed rgba(255,255,255,0.15)',
+                  display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(0,0,0,0.1)'}}>
+                  <span className="text-muted" style={{fontSize:11}}>?</span>
+                </div>
+              </div>
+            </div>
+
+            {isHost ? (
+              <button onClick={handleDrawTrump} disabled={gameState.deckPile.length===0} className="btn-gold" style={{width:'100%',padding:13}}>
+                🂠 Trekk trumfkort
+              </button>
+            ) : (
+              <p className="text-muted" style={{fontSize:12}}>Venter på at verten trekker trumfkort...</p>
+            )}
+            <p className="text-muted" style={{fontSize:10,marginTop:8,opacity:0.6}}>
+              {gameState.deckPile.length} kort igjen i bunken (ikke i spill)
+            </p>
+          </div>
+        )}
+
+        {/* ── Bidding ── */}
         {gameState.phase === 'bidding' && (
           <div className="glass float-in" style={{padding:20,width:'100%',maxWidth:360}}>
             {gameState.unseenBid && (
@@ -543,25 +836,35 @@ export default function GameRoom({ roomCode, userId, userName, onLeave, isGuest,
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:9,padding:'0 4px'}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             {/* My trick pile */}
-            <div style={{position:'relative',height:28,width: Math.max((myPlayer?.tricks??0)*6+18,22)}}>
-              {Array.from({length: myPlayer?.tricks ?? 0}).map((_,ti) => (
-                <div key={ti} style={{position:'absolute',left:ti*6,top:0,width:18,height:26,borderRadius:3,background:'linear-gradient(160deg,#fffef5,#f0ead8)',border:'1px solid rgba(0,0,0,0.15)',boxShadow:'1px 1px 3px rgba(0,0,0,0.25)'}} />
-              ))}
-              {(myPlayer?.tricks??0) === 0 && <span className="text-muted" style={{fontSize:10,lineHeight:'28px'}}>—</span>}
-            </div>
+            {(myPlayer?.tricks ?? 0) > 0 && (
+              <div style={{display:'flex',alignItems:'center',gap:5}}>
+                <div style={{position:'relative',height:30,width:Math.min((myPlayer?.tricks??0)*5+20,52),flexShrink:0}}>
+                  {Array.from({length:Math.min(myPlayer?.tricks??0,5)}).map((_,ti) => (
+                    <div key={ti} style={{position:'absolute',left:ti*Math.min(8,44/Math.max((myPlayer?.tricks??1)-1,1)),top:0,width:20,height:28,borderRadius:3,
+                      background:'linear-gradient(160deg,#fffef5,#e8dfc8)',
+                      border:'1px solid rgba(150,120,60,0.4)',
+                      boxShadow:'1px 2px 4px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.8)'}} />
+                  ))}
+                </div>
+                <span style={{fontSize:12,fontWeight:700,color:'var(--gold)',fontFamily:'Bebas Neue,sans-serif',letterSpacing:'0.05em'}}>×{myPlayer?.tricks}</span>
+              </div>
+            )}
             <p className="text-muted" style={{fontSize:11}}>
               {myPlayer?.bid !== null ? `Meldt: ${myPlayer?.bid} · Tatt: ${myPlayer?.tricks}` : 'Din hånd'}
             </p>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
-            {/* Last trick button */}
+            {/* Last trick button — only show when there IS a last trick */}
             {gameState.lastTrick && gameState.lastTrick.length > 0 && (
               <button onClick={() => setShowLastTrick(true)} className="btn-glass"
                 style={{padding:'4px 10px',fontSize:11,borderRadius:8}}>
                 Forrige stikk
               </button>
             )}
-            <span className="font-display text-gold" style={{fontSize:22}}>{myPlayer?.totalScore}</span>
+            {/* Only show score when non-zero */}
+            {(myPlayer?.totalScore ?? 0) > 0 && (
+              <span className="font-display text-gold" style={{fontSize:22}}>{myPlayer?.totalScore}</span>
+            )}
           </div>
         </div>
         <div style={{display:'flex',gap:3,flexWrap:'wrap',justifyContent:'center'}}>
