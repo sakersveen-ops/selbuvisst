@@ -3,6 +3,8 @@ export type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 
 
 export interface Card { suit: Suit; rank: Rank }
 
+export interface TrickPlay { playerId: string; card: Card }
+
 export interface Player {
   id: string; name: string; hand: Card[]
   bid: number | null; tricks: number; score: number; totalScore: number
@@ -10,11 +12,13 @@ export interface Player {
 
 export interface GameState {
   players: Player[]
-  round: number          // current round (counts DOWN from startRound to 1)
-  startRound: number     // max cards e.g. 10
-  minRound: number       // last round (always 1)
+  round: number
+  startRound: number
+  minRound: number
   trump: Card | null
-  currentTrick: { playerId: string; card: Card }[]
+  currentTrick: TrickPlay[]
+  lastTrick: TrickPlay[] | null          // ← NEW: last completed trick
+  lastTrickWinnerId: string | null       // ← NEW: who won last trick
   leadSuit: Suit | null
   currentPlayerIndex: number
   phase: 'bidding' | 'playing' | 'roundEnd' | 'gameEnd'
@@ -70,6 +74,8 @@ export function initGame(
     minRound: 1,
     trump: null,
     currentTrick: [],
+    lastTrick: null,
+    lastTrickWinnerId: null,
     leadSuit: null,
     currentPlayerIndex: 0,
     phase: 'bidding',
@@ -95,6 +101,8 @@ export function dealRound(state: GameState): GameState {
     players: newPlayers,
     trump: trumpCard,
     currentTrick: [],
+    lastTrick: null,
+    lastTrickWinnerId: null,
     leadSuit: null,
     phase: 'bidding',
     unseenBid: state.round === state.minRound,
@@ -119,6 +127,7 @@ export function playCard(state: GameState, playerId: string, card: Card): GameSt
     return { ...state, players: newPlayers, currentTrick: newTrick, leadSuit, currentPlayerIndex: (state.currentPlayerIndex + 1) % state.players.length }
   }
 
+  // Resolve trick
   const trump = state.trump?.suit ?? null
   let winner = newTrick[0]
   for (const play of newTrick.slice(1)) {
@@ -135,10 +144,27 @@ export function playCard(state: GameState, playerId: string, card: Card): GameSt
     const newScores = { ...state.scores }
     for (const p of scoredPlayers) newScores[p.id] = [...(newScores[p.id] ?? []), p.score]
     const isGameEnd = state.round === state.minRound
-    return { ...state, players: scoredPlayers, currentTrick: [], leadSuit: null, phase: isGameEnd ? 'gameEnd' : 'roundEnd', scores: newScores }
+    return {
+      ...state,
+      players: scoredPlayers,
+      currentTrick: [],
+      lastTrick: newTrick,
+      lastTrickWinnerId: winner.playerId,
+      leadSuit: null,
+      phase: isGameEnd ? 'gameEnd' : 'roundEnd',
+      scores: newScores,
+    }
   }
 
-  return { ...state, players: resolvedPlayers, currentTrick: [], leadSuit: null, currentPlayerIndex: winnerIdx }
+  return {
+    ...state,
+    players: resolvedPlayers,
+    currentTrick: [],
+    lastTrick: newTrick,
+    lastTrickWinnerId: winner.playerId,
+    leadSuit: null,
+    currentPlayerIndex: winnerIdx,
+  }
 }
 
 export function nextRound(state: GameState): GameState {
@@ -147,7 +173,6 @@ export function nextRound(state: GameState): GameState {
   return dealRound({ ...state, round: next })
 }
 
-// How many rounds remain (including current)
 export function roundsPlayed(state: GameState): number {
   return state.startRound - state.round + 1
 }

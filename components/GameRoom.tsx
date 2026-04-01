@@ -16,6 +16,8 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
   const [allBidsIn, setAllBidsIn] = useState<Record<string, number>>({})
   const [pendingBid, setPendingBid] = useState<number | null>(null)
   const [sidePanel, setSidePanel] = useState<'none' | 'roundScores' | 'roomBoard' | 'globalBoard'>('none')
+  const [showLastTrick, setShowLastTrick] = useState(false)
+  const [trickJustResolved, setTrickJustResolved] = useState(false)
   // Lobby settings (host only)
   const [maxPlayers, setMaxPlayers] = useState(4)
   const [maxRounds, setMaxRounds] = useState(10)
@@ -93,7 +95,19 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
   function handlePlayCard(card: Card) {
     if (!gameState) return
     if (gameState.players[gameState.currentPlayerIndex].id !== userId) return
-    updateState(playCard(gameState, userId, card))
+    const newState = playCard(gameState, userId, card)
+    // If trick just completed (currentTrick went from full → empty), linger 2.5s
+    const trickCompleted = newState.currentTrick.length === 0 && gameState.currentTrick.length === gameState.players.length - 1
+    if (trickCompleted && newState.phase === 'playing') {
+      setTrickJustResolved(true)
+      setGameState(newState)
+      setTimeout(async () => {
+        setTrickJustResolved(false)
+        await supabase.from('rooms').update({ state: newState }).eq('code', roomCode)
+      }, 2500)
+    } else {
+      updateState(newState)
+    }
   }
 
   function handleNextRound() {
@@ -336,19 +350,26 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
         </div>
       )}
 
-      {/* Opponents */}
+      {/* Opponents row with trick piles */}
       <div style={{padding:'10px 10px 0',display:'flex',gap:6,overflowX:'auto',position:'relative',zIndex:1}}>
         {gameState.players.filter(p => p.id !== userId).map(p => (
-          <div key={p.id} className={`player-chip${currentPlayer?.id === p.id ? ' active' : ''}`} style={{padding:'8px 12px',flexShrink:0,minWidth:130}}>
-            <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:3}}>
+          <div key={p.id} className={`player-chip${currentPlayer?.id === p.id ? ' active' : ''}`} style={{padding:'8px 12px',flexShrink:0,minWidth:140}}>
+            <div style={{display:'flex',alignItems:'center',gap:7,marginBottom:4}}>
               <div style={{width:26,height:26,borderRadius:'50%',background:'linear-gradient(135deg,var(--purple-bright),var(--purple-mid))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,flexShrink:0}}>
                 {p.name.charAt(0).toUpperCase()}
               </div>
               <span className="text-cream" style={{fontSize:12,fontWeight:500,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name.split(' ')[0]}</span>
               {currentPlayer?.id === p.id && <span style={{fontSize:9,color:'var(--gold)',marginLeft:'auto'}}>▶</span>}
             </div>
-            <div style={{display:'flex',justifyContent:'space-between',fontSize:11}}>
-              <span className="text-muted">{p.hand.length}🃏 {p.bid!==null ? `· ${p.bid}↗ · ${p.tricks}✓` : '· ...'}</span>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',fontSize:11}}>
+              <span className="text-muted">{p.bid!==null ? `${p.bid}↗` : '...'}</span>
+              {/* Trick pile: stacked mini cards */}
+              <div style={{position:'relative',height:28,width: Math.max(p.tricks*6+18,22)}}>
+                {Array.from({length: p.tricks}).map((_,ti) => (
+                  <div key={ti} style={{position:'absolute',left:ti*6,top:0,width:18,height:26,borderRadius:3,background:'linear-gradient(160deg,#fffef5,#f0ead8)',border:'1px solid rgba(0,0,0,0.15)',boxShadow:'1px 1px 3px rgba(0,0,0,0.25)'}} />
+                ))}
+                {p.tricks === 0 && <span className="text-muted" style={{fontSize:10,lineHeight:'28px'}}>—</span>}
+              </div>
               <span className="font-display text-gold" style={{fontSize:15}}>{p.totalScore}</span>
             </div>
           </div>
@@ -357,23 +378,66 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
 
       {/* Table center */}
       <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:14,position:'relative',zIndex:1}}>
-        {/* Current trick */}
-        {gameState.currentTrick.length > 0 && (
-          <div style={{marginBottom:14,textAlign:'center'}}>
-            <p className="text-muted" style={{fontSize:10,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:8}}>Stikk pågår</p>
-            <div style={{display:'flex',gap:8,justifyContent:'center'}}>
-              {gameState.currentTrick.map(({ playerId, card }) => {
-                const player = gameState.players.find(p => p.id === playerId)
-                return (
-                  <div key={playerId} style={{textAlign:'center'}}>
-                    <CardComponent card={card} size="md" />
-                    <p className="text-muted" style={{fontSize:10,marginTop:3}}>{player?.name?.split(' ')[0]}</p>
-                  </div>
-                )
-              })}
+
+        {/* Last trick viewer modal */}
+        {showLastTrick && gameState.lastTrick && (
+          <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',backdropFilter:'blur(8px)',zIndex:50,display:'flex',alignItems:'center',justifyContent:'center',padding:20}}
+            onClick={() => setShowLastTrick(false)}>
+            <div className="glass float-in" style={{padding:24,maxWidth:340,width:'100%'}} onClick={e => e.stopPropagation()}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+                <p className="font-display text-gold" style={{fontSize:22}}>FORRIGE STIKK</p>
+                <button onClick={() => setShowLastTrick(false)} className="btn-glass" style={{padding:'6px 12px',fontSize:12}}>✕</button>
+              </div>
+              {gameState.lastTrickWinnerId && (
+                <p className="text-muted" style={{fontSize:12,marginBottom:12,textAlign:'center'}}>
+                  Vant av <strong className="text-gold">{gameState.players.find(p=>p.id===gameState.lastTrickWinnerId)?.name}</strong>
+                </p>
+              )}
+              <div style={{display:'flex',gap:10,justifyContent:'center',flexWrap:'wrap'}}>
+                {gameState.lastTrick.map(({playerId,card}) => {
+                  const player = gameState.players.find(p=>p.id===playerId)
+                  const isWinner = playerId === gameState.lastTrickWinnerId
+                  return (
+                    <div key={playerId} style={{textAlign:'center'}}>
+                      <div style={{padding:2,borderRadius:10,border: isWinner ? '2px solid var(--gold)' : '2px solid transparent',boxShadow: isWinner ? '0 0 12px rgba(245,200,66,0.5)' : 'none'}}>
+                        <CardComponent card={card} size="md" />
+                      </div>
+                      <p className="text-muted" style={{fontSize:10,marginTop:4}}>{player?.name?.split(' ')[0]}</p>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
         )}
+
+        {/* Current trick — lingers after resolution */}
+        {(gameState.currentTrick.length > 0 || trickJustResolved) && (() => {
+          const trickToShow = trickJustResolved ? gameState.lastTrick : gameState.currentTrick
+          const winnerId = trickJustResolved ? gameState.lastTrickWinnerId : null
+          if (!trickToShow || trickToShow.length === 0) return null
+          return (
+            <div style={{marginBottom:14,textAlign:'center'}}>
+              <p className="text-muted" style={{fontSize:10,letterSpacing:'0.2em',textTransform:'uppercase',marginBottom:8}}>
+                {trickJustResolved ? 'STIKK TIL ' + (gameState.players.find(p=>p.id===winnerId)?.name?.split(' ')[0] ?? '') : 'STIKK PÅGÅR'}
+              </p>
+              <div style={{display:'flex',gap:8,justifyContent:'center'}}>
+                {trickToShow.map(({ playerId, card }) => {
+                  const player = gameState.players.find(p => p.id === playerId)
+                  const isWinner = trickJustResolved && playerId === winnerId
+                  return (
+                    <div key={playerId} style={{textAlign:'center'}}>
+                      <div style={{padding:2,borderRadius:10,border: isWinner ? '2px solid var(--gold)' : '2px solid transparent',transition:'border 0.3s',boxShadow: isWinner ? '0 0 16px rgba(245,200,66,0.6)' : 'none'}}>
+                        <CardComponent card={card} size="md" />
+                      </div>
+                      <p className="text-muted" style={{fontSize:10,marginTop:3}}>{player?.name?.split(' ')[0]}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Bidding */}
         {gameState.phase === 'bidding' && (
@@ -440,10 +504,28 @@ export default function GameRoom({ roomCode, userId, userName, onLeave }: Props)
       {/* My hand */}
       <div style={{background:'rgba(0,0,0,0.38)',backdropFilter:'blur(20px)',borderTop:'1px solid rgba(255,255,255,0.07)',padding:'12px 10px 20px',position:'relative',zIndex:2}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:9,padding:'0 4px'}}>
-          <p className="text-muted" style={{fontSize:11}}>
-            {myPlayer?.bid !== null ? `Meldt: ${myPlayer?.bid} · Tatt: ${myPlayer?.tricks}` : 'Din hånd'}
-          </p>
-          <span className="font-display text-gold" style={{fontSize:22}}>{myPlayer?.totalScore}</span>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {/* My trick pile */}
+            <div style={{position:'relative',height:28,width: Math.max((myPlayer?.tricks??0)*6+18,22)}}>
+              {Array.from({length: myPlayer?.tricks ?? 0}).map((_,ti) => (
+                <div key={ti} style={{position:'absolute',left:ti*6,top:0,width:18,height:26,borderRadius:3,background:'linear-gradient(160deg,#fffef5,#f0ead8)',border:'1px solid rgba(0,0,0,0.15)',boxShadow:'1px 1px 3px rgba(0,0,0,0.25)'}} />
+              ))}
+              {(myPlayer?.tricks??0) === 0 && <span className="text-muted" style={{fontSize:10,lineHeight:'28px'}}>—</span>}
+            </div>
+            <p className="text-muted" style={{fontSize:11}}>
+              {myPlayer?.bid !== null ? `Meldt: ${myPlayer?.bid} · Tatt: ${myPlayer?.tricks}` : 'Din hånd'}
+            </p>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            {/* Last trick button */}
+            {gameState.lastTrick && gameState.lastTrick.length > 0 && (
+              <button onClick={() => setShowLastTrick(true)} className="btn-glass"
+                style={{padding:'4px 10px',fontSize:11,borderRadius:8}}>
+                Forrige stikk
+              </button>
+            )}
+            <span className="font-display text-gold" style={{fontSize:22}}>{myPlayer?.totalScore}</span>
+          </div>
         </div>
         <div style={{display:'flex',gap:3,flexWrap:'wrap',justifyContent:'center'}}>
           {[...(myPlayer?.hand ?? [])].sort((a, b) => {
